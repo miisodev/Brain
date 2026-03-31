@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "Trilium": {
+      "command": "bun",
+      "args": [
+        "run",
+        "C:/Trilium/dist/index.js"
+      ],
+      "env": {
+        "TRILIUM_BASE_URL": "http://localhost:8080",
+        "TRILIUM_ETAPI_TOKEN": "your-etapi-token-here"
+      }
+    }
+  }
+}
