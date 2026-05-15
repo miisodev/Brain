@@ -20,10 +20,10 @@ Trilium Brain                       ← brain root
 │   ├── Preferences                 — working style, stated preferences
 │   └── Context                     — current life/work situation
 ├── Working Memory/                 — ephemeral: threads resolve, decisions promote, inbox triages
-│   ├── Inbox                       — unprocessed captures (triage with triage_inbox)
-│   ├── Threads                     — active multi-session reasoning chains
-│   ├── Decisions                   — pending or active decision records (ADR format)
-│   └── Open Questions              — all questions, open and resolved (archive in place, never move)
+│   ├── Inbox/                      — unprocessed captures land here (triage with triage_inbox)
+│   ├── Threads/                    — thread notes land here (create_thread)
+│   ├── Decisions/                  — decision notes land here (create_decision)
+│   └── Open Questions/             — question notes land here; archive in place when resolved, never move
 ├── Knowledge/                      — durable, atomic, evergreen
 │   ├── People                      — person notes (create manually, see People section below)
 │   ├── Organizations               — org notes (create manually, see People section below)
@@ -51,7 +51,7 @@ Trilium Brain                       ← brain root
 **Structural rules — never violate:**
 - Threads → always under Working Memory → Threads (`create_thread`)
 - Decisions → always under Working Memory → Decisions (`create_decision`)
-- Open Questions → always under Working Memory → Open Questions; archive in place when resolved, never move
+- Questions → always inside Working Memory → Open Questions/ (`create_note(parentNoteId=<workingMemory.openQuestions>)`); archive in place when resolved, never move
 - Concepts → under Knowledge → [domain] → Concepts (`create_concept` with domain)
 - Opinions → direct children of Opinions, never nested (`create_opinion`)
 - Sessions → one per session under Log → Sessions (`log_session`)
