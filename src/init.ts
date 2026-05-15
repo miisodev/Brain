@@ -7,6 +7,7 @@
  */
 
 import { TriliumClient } from "./trilium.js";
+import { saveConfig, configFilePath } from "./config.js";
 import {
   threadContent,
   decisionContent,
@@ -135,54 +136,50 @@ log("templates.projectBrief", tProject.note.noteId);
 log("templates.person",       tPerson.note.noteId);
 log("templates.opinion",      tOpinion.note.noteId);
 
+// ── Write brain.json ──────────────────────────────────────────────────────────
+
+const config = {
+  root: created["root"],
+  identity: {
+    root:        created["identity.root"],
+    profile:     created["identity.profile"],
+    preferences: created["identity.preferences"],
+    context:     created["identity.context"],
+  },
+  workingMemory: {
+    root:          created["workingMemory.root"],
+    inbox:         created["workingMemory.inbox"],
+    threads:       created["workingMemory.threads"],
+    decisions:     created["workingMemory.decisions"],
+    openQuestions: created["workingMemory.openQuestions"],
+  },
+  knowledge: {
+    root:          created["knowledge.root"],
+    people:        created["knowledge.people"],
+    organizations: created["knowledge.organizations"],
+    projects:      created["knowledge.projects"],
+  },
+  opinions: created["opinions"],
+  log: {
+    root:          created["log.root"],
+    sessions:      created["log.sessions"],
+    decisionsMade: created["log.decisionsMade"],
+  },
+  templates: {
+    root:         created["templates.root"],
+    thread:       created["templates.thread"],
+    decision:     created["templates.decision"],
+    concept:      created["templates.concept"],
+    projectBrief: created["templates.projectBrief"],
+    person:       created["templates.person"],
+    opinion:      created["templates.opinion"],
+  },
+};
+
+const savedPath = saveConfig(config);
+
 // ── Output ────────────────────────────────────────────────────────────────────
 
-console.log("\n✅ Done.\n");
-console.log("─".repeat(60));
-console.log("Paste the following into src/constants.ts then run: bun run build");
-console.log("─".repeat(60));
-console.log(`
-export const Brain = {
-  root: "${created["root"]}",
-
-  identity: {
-    root: "${created["identity.root"]}",
-    profile: "${created["identity.profile"]}",
-    preferences: "${created["identity.preferences"]}",
-    context: "${created["identity.context"]}",
-  },
-
-  workingMemory: {
-    root: "${created["workingMemory.root"]}",
-    inbox: "${created["workingMemory.inbox"]}",
-    threads: "${created["workingMemory.threads"]}",
-    decisions: "${created["workingMemory.decisions"]}",
-    openQuestions: "${created["workingMemory.openQuestions"]}",
-  },
-
-  knowledge: {
-    root: "${created["knowledge.root"]}",
-    people: "${created["knowledge.people"]}",
-    organizations: "${created["knowledge.organizations"]}",
-    projects: "${created["knowledge.projects"]}",
-  },
-
-  opinions: "${created["opinions"]}",
-
-  log: {
-    root: "${created["log.root"]}",
-    sessions: "${created["log.sessions"]}",
-    decisionsMade: "${created["log.decisionsMade"]}",
-  },
-
-  templates: {
-    root: "${created["templates.root"]}",
-    thread: "${created["templates.thread"]}",
-    decision: "${created["templates.decision"]}",
-    concept: "${created["templates.concept"]}",
-    projectBrief: "${created["templates.projectBrief"]}",
-    person: "${created["templates.person"]}",
-    opinion: "${created["templates.opinion"]}",
-  },
-} as const;
-`);
+console.log("\n✅ Done.");
+console.log(`\nConfig written to: ${savedPath}`);
+console.log("Start the MCP server — no rebuild or manual ID pasting required.\n");

@@ -22,7 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { TriliumClient } from "./trilium.js";
-import { Brain } from "./constants.js";
+import { type BrainConfig, saveConfig } from "./config.js";
 import { SynapseTypes } from "./types.js";
 import {
   threadContent,
@@ -80,7 +80,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 // ── Registration ───────────────────────────────────────────────────────────────
 
-export function registerTools(server: McpServer, trilium: TriliumClient): void {
+export function registerTools(server: McpServer, trilium: TriliumClient, brainRef: { config: BrainConfig }): void {
+  // b() always returns the latest config — updated live by bootstrap_brain
+  const b = () => brainRef.config;
 
   // ════════════════════════════════════════════════════════════════════════════
   // SESSION / ORIENTATION
@@ -95,7 +97,7 @@ Call ONCE at the start of every session. Never repeat mid-session.
 Returns: { id, title, noteType, children[] } — three levels deep.`,
     {},
     async () => {
-      const root = await trilium.getNote(Brain.root);
+      const root = await trilium.getNote(b().root);
       const children = await Promise.all(
         root.childNoteIds.map(async (cid) => {
           const child = await trilium.getNote(cid);
@@ -123,12 +125,12 @@ Returns: { id, title, noteType, children[] } — three levels deep.`,
         title: root.title,
         children,
         structuralIds: {
-          identity: Brain.identity,
-          workingMemory: Brain.workingMemory,
-          knowledge: Brain.knowledge,
-          opinions: Brain.opinions,
-          log: Brain.log,
-          templates: Brain.templates,
+          identity: b().identity,
+          workingMemory: b().workingMemory,
+          knowledge: b().knowledge,
+          opinions: b().opinions,
+          log: b().log,
+          templates: b().templates,
         },
       });
     }
@@ -150,7 +152,7 @@ Returns the new session noteId.`,
     async ({ title, summary, decisions, modified, openQuestions, date }) => {
       const d = date ?? today();
       const sessionTitle = title ?? d;
-      const parentId = Brain.log.sessions || Brain.log.root;
+      const parentId = b().log.sessions || b().log.root;
 
       // Build structured HTML content
       let html = `<p><strong>Date:</strong> ${d}</p>`;
@@ -525,7 +527,7 @@ Returns a sorted list of type names.`,
       ancestorNoteId: z.string().optional().describe("Scope to subtree (default: entire brain)"),
     },
     async ({ ancestorNoteId }) => {
-      const types = await trilium.listSynapseTypes(ancestorNoteId ?? Brain.root);
+      const types = await trilium.listSynapseTypes(ancestorNoteId ?? b().root);
       return txt({ synapseTypes: types, canonical: SynapseTypes });
     }
   );
@@ -667,7 +669,7 @@ Automatically adds: #noteType=thread  #status=active  #dateOpened`,
     },
     async ({ title, context, topic, date }) => {
       const d = date ?? today();
-      const parentId = Brain.workingMemory.threads || Brain.workingMemory.root;
+      const parentId = b().workingMemory.threads || b().workingMemory.root;
       const result = await trilium.createNote(parentId, title, threadContent(context ?? "", d));
       const nid = result.note.noteId;
       await Promise.all([
@@ -695,7 +697,7 @@ Automatically adds: #noteType=decision  #status=pending  #dateOpened`,
     },
     async ({ title, context, topic, date }) => {
       const d = date ?? today();
-      const parentId = Brain.workingMemory.decisions || Brain.workingMemory.root;
+      const parentId = b().workingMemory.decisions || b().workingMemory.root;
       const result = await trilium.createNote(parentId, title, decisionContent(context ?? ""));
       const nid = result.note.noteId;
       await Promise.all([
@@ -728,7 +730,7 @@ Automatically adds: #noteType=concept  #domain={domain}`,
         // Try to find an existing domain note by label
         try {
           const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
-            ancestorNoteId: Brain.knowledge.root,
+            ancestorNoteId: b().knowledge.root,
             fastSearch: true,
             limit: 1,
           });
@@ -737,7 +739,7 @@ Automatically adds: #noteType=concept  #domain={domain}`,
           // Fall back to knowledge root
         }
       }
-      parentId = parentId ?? Brain.knowledge.root;
+      parentId = parentId ?? b().knowledge.root;
 
       const result = await trilium.createNote(parentId, title, conceptContent(domain));
       const nid = result.note.noteId;
@@ -759,7 +761,7 @@ Returns all created note IDs for immediate use.`,
       name: z.string().describe("Domain name (e.g. Technology, Philosophy, Finance)"),
     },
     async ({ name }) => {
-      const domainRoot = await trilium.createNote(Brain.knowledge.root, name, domainContent(name));
+      const domainRoot = await trilium.createNote(b().knowledge.root, name, domainContent(name));
       const did = domainRoot.note.noteId;
       await trilium.addLabel(did, "noteType", "domain");
       await trilium.addLabel(did, "domain", name);
@@ -798,7 +800,7 @@ Automatically adds: #noteType=opinion  #mood={mood}  #dateWritten`,
     },
     async ({ title, mood, topics, date }) => {
       const d = date ?? today();
-      const result = await trilium.createNote(Brain.opinions, title, opinionContent(d, mood ?? "contemplative"));
+      const result = await trilium.createNote(b().opinions, title, opinionContent(d, mood ?? "contemplative"));
       const nid = result.note.noteId;
       await Promise.all([
         trilium.addLabel(nid, "noteType", "opinion"),
@@ -824,7 +826,7 @@ Automatically adds: #noteType=project  #status=active  #dateStarted`,
     },
     async ({ title, goal, topic, date }) => {
       const d = date ?? today();
-      const projectsId = Brain.knowledge.projects || Brain.knowledge.root;
+      const projectsId = b().knowledge.projects || b().knowledge.root;
       const root = await trilium.createNote(projectsId, title, projectContent(goal ?? "", d));
       const pid = root.note.noteId;
       await Promise.all([
@@ -867,13 +869,13 @@ Use at session start to orient before acting, and before creating new engrams (a
     },
     async ({ query, section, limit }) => {
       const sectionMap: Record<string, string> = {
-        identity:      Brain.identity.root,
-        workingMemory: Brain.workingMemory.root,
-        knowledge:     Brain.knowledge.root,
-        opinions:      Brain.opinions,
-        log:           Brain.log.root,
+        identity:      b().identity.root,
+        workingMemory: b().workingMemory.root,
+        knowledge:     b().knowledge.root,
+        opinions:      b().opinions,
+        log:           b().log.root,
       };
-      const ancestorNoteId = (!section || section === "all") ? Brain.root : sectionMap[section];
+      const ancestorNoteId = (!section || section === "all") ? b().root : sectionMap[section];
       const result = await trilium.searchNotes(query, { ancestorNoteId, limit: limit ?? 10 });
 
       const tops = result.results.slice(0, 3);
@@ -909,10 +911,10 @@ Adds #noteType, #dateStored, and optional #topic label automatically.`,
     },
     async ({ section, title, content, topic, subsectionId }) => {
       const parentMap: Record<string, string> = {
-        identity:      Brain.identity.root,
-        workingMemory: Brain.workingMemory.root,
-        knowledge:     Brain.knowledge.root,
-        opinions:      Brain.opinions,
+        identity:      b().identity.root,
+        workingMemory: b().workingMemory.root,
+        knowledge:     b().knowledge.root,
+        opinions:      b().opinions,
       };
       const parentNoteId = subsectionId ?? parentMap[section];
       const result = await trilium.createNote(parentNoteId, title, content);
@@ -963,7 +965,7 @@ Use to correct, expand, or supersede stored knowledge rather than creating dupli
 
       if (action === "list") {
         const result = await trilium.searchNotes("#noteType=thread #status=active", {
-          ancestorNoteId: Brain.workingMemory.root,
+          ancestorNoteId: b().workingMemory.root,
           fastSearch: true,
         });
         return txt(result.results.map(noteStub));
@@ -972,7 +974,7 @@ Use to correct, expand, or supersede stored knowledge rather than creating dupli
       if (action === "open") {
         if (!title) throw new Error("title required to open a thread");
         const result = await trilium.createNote(
-          Brain.workingMemory.threads || Brain.workingMemory.root,
+          b().workingMemory.threads || b().workingMemory.root,
           title,
           threadContent("", d)
         );
@@ -1038,14 +1040,14 @@ Use when a thread has yielded reusable knowledge worth preserving.`,
       if (!parentId && domain) {
         try {
           const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
-            ancestorNoteId: Brain.knowledge.root, fastSearch: true, limit: 1,
+            ancestorNoteId: b().knowledge.root, fastSearch: true, limit: 1,
           });
           parentId = res.results[0]?.noteId;
         } catch {
           // Fall through to knowledge root
         }
       }
-      parentId = parentId ?? Brain.knowledge.root;
+      parentId = parentId ?? b().knowledge.root;
 
       const newTitle = targetTitle ?? sourceMeta.title;
       const result = await trilium.createNote(parentId, newTitle, sourceContent);
@@ -1082,7 +1084,7 @@ Searches within ancestorNoteId scope (default: knowledge root).`,
       limit: z.number().optional().describe("Max orphans to return (default: 30)"),
     },
     async ({ ancestorNoteId, limit }) => {
-      const scopeId = ancestorNoteId ?? Brain.knowledge.root;
+      const scopeId = ancestorNoteId ?? b().knowledge.root;
       const result = await trilium.searchNotes("note", { ancestorNoteId: scopeId, limit: 200 });
 
       const orphans: Array<{ id: string; title: string; type?: string }> = [];
@@ -1117,7 +1119,7 @@ Ranked by number of shared labels (most similar first).`,
       limit: z.number().optional().describe("Max suggestions (default: 10)"),
     },
     async ({ noteId, ancestorNoteId, limit }) => {
-      const scopeId = ancestorNoteId ?? Brain.knowledge.root;
+      const scopeId = ancestorNoteId ?? b().knowledge.root;
       const suggestions = await trilium.suggestSynapses(noteId, scopeId, limit ?? 10);
       return txt({ suggestions });
     }
@@ -1281,15 +1283,11 @@ Call at the end of sessions that made significant structural changes.`,
   server.tool(
     "bootstrap_brain",
     `Initialize the full Trilium Brain note hierarchy from scratch.
-Safe to call on existing instances — checks if root exists before creating anything.
+Safe to call on any instance — checks if a brain root already exists before creating anything.
 
-If already initialized: reports live structure and current constants.
-If fresh instance: creates the full tree, returns all noteIds, and prints the constants.ts snippet.
-
-After fresh initialization:
-  1. Copy the returned noteIds into src/constants.ts
-  2. Run: bun run build
-  3. Restart the MCP server
+If already initialized: reports live structure, updates brain.json, and reloads config in-place.
+If fresh instance: creates the full tree, writes brain.json, and activates config immediately
+  — no manual ID copying, no rebuild, no server restart required.
 
 Structure created:
   root → 🧠 Trilium Brain
@@ -1301,156 +1299,123 @@ Structure created:
     └── 🗂️ Templates/  (Thread · Decision · Concept · Project · Person · Opinion)`,
     {},
     async () => {
-      const { Brain: B } = await import("./constants.js");
-      // Check if root already exists
-      try {
-        const existing = await trilium.getNote(B.root);
-        const children = await Promise.all(
-          existing.childNoteIds.map(async (cid) => {
-            const child = await trilium.getNote(cid);
-            return { id: child.noteId, title: child.title };
-          })
-        );
-        return txt({
-          status: "already_initialized",
-          message: "Brain structure exists. No changes made.",
-          root: { id: existing.noteId, title: existing.title },
-          children,
-          constants: B,
-        });
-      } catch {
-        // Fresh init
+      // ── Check if brain root already exists ──────────────────────────────────
+      if (b().root) {
+        try {
+          const existing = await trilium.getNote(b().root);
+          const children = await Promise.all(
+            existing.childNoteIds.map(async (cid) => {
+              const child = await trilium.getNote(cid);
+              return { id: child.noteId, title: child.title };
+            })
+          );
+          // Refresh brain.json in case it drifted
+          const saved = saveConfig(brainRef.config);
+          return txt({
+            status: "already_initialized",
+            message: `Brain structure exists. Config refreshed at: ${saved}`,
+            root: { id: existing.noteId, title: existing.title },
+            children,
+            config: brainRef.config,
+          });
+        } catch {
+          // Root ID in config is stale — fall through to fresh init
+        }
       }
 
-      const created: Record<string, string> = {};
-
-      // Root
+      // ── Fresh initialization ─────────────────────────────────────────────────
       const root = await trilium.createNote("root", "Trilium Brain", "");
-      created.root = root.note.noteId;
       await trilium.addLabel(root.note.noteId, "iconClass", "bx bx-brain");
-
       const rootId = root.note.noteId;
 
-      // ── Identity ────────────────────────────────────────────────────────────
       const identity = await trilium.createNote(rootId, "Identity", "<p><em>Who I am — persistent facts, preferences, and current context.</em></p>");
-      created.identityRoot = identity.note.noteId;
       const [profile, preferences, context] = await Promise.all([
         trilium.createNote(identity.note.noteId, "Profile", ""),
         trilium.createNote(identity.note.noteId, "Preferences", ""),
         trilium.createNote(identity.note.noteId, "Context", ""),
       ]);
-      created.identityProfile      = profile.note.noteId;
-      created.identityPreferences  = preferences.note.noteId;
-      created.identityContext      = context.note.noteId;
 
-      // ── Working Memory ──────────────────────────────────────────────────────
       const wm = await trilium.createNote(rootId, "Working Memory", "<p><em>Ephemeral — threads get resolved, decisions get promoted, inbox gets triaged.</em></p>");
-      created.workingMemoryRoot = wm.note.noteId;
       const [inbox, threads, decisions, openQ] = await Promise.all([
         trilium.createNote(wm.note.noteId, "Inbox", ""),
         trilium.createNote(wm.note.noteId, "Threads", ""),
         trilium.createNote(wm.note.noteId, "Decisions", ""),
         trilium.createNote(wm.note.noteId, "Open Questions", ""),
       ]);
-      created.workingMemoryInbox         = inbox.note.noteId;
-      created.workingMemoryThreads       = threads.note.noteId;
-      created.workingMemoryDecisions     = decisions.note.noteId;
-      created.workingMemoryOpenQuestions = openQ.note.noteId;
 
-      // ── Knowledge ───────────────────────────────────────────────────────────
       const knowledge = await trilium.createNote(rootId, "Knowledge", "<p><em>Durable — atomic, evergreen engrams organized by domain.</em></p>");
-      created.knowledgeRoot = knowledge.note.noteId;
       const [people, orgs, projects] = await Promise.all([
         trilium.createNote(knowledge.note.noteId, "People", ""),
         trilium.createNote(knowledge.note.noteId, "Organizations", ""),
         trilium.createNote(knowledge.note.noteId, "Projects", ""),
       ]);
-      created.knowledgePeople        = people.note.noteId;
-      created.knowledgeOrganizations = orgs.note.noteId;
-      created.knowledgeProjects      = projects.note.noteId;
 
-      // ── Opinions ────────────────────────────────────────────────────────────
       const opinions = await trilium.createNote(rootId, "Opinions", "<p><em>Blog/diary entries — prose, arguments, stances. No subtrees.</em></p>");
-      created.opinions = opinions.note.noteId;
 
-      // ── Log ─────────────────────────────────────────────────────────────────
       const log = await trilium.createNote(rootId, "Log", "<p><em>Temporal records — sessions and promoted decisions.</em></p>");
-      created.logRoot = log.note.noteId;
       const [sessions, decisionsMade] = await Promise.all([
         trilium.createNote(log.note.noteId, "Sessions", ""),
         trilium.createNote(log.note.noteId, "Decisions Made", ""),
       ]);
-      created.logSessions      = sessions.note.noteId;
-      created.logDecisionsMade = decisionsMade.note.noteId;
 
-      // ── Templates ───────────────────────────────────────────────────────────
       const templates = await trilium.createNote(rootId, "Templates", "<p><em>Structural templates — used by spawn_* tools.</em></p>");
-      created.templatesRoot = templates.note.noteId;
       const [tThread, tDecision, tConcept, tProject, tPerson, tOpinion] = await Promise.all([
-        trilium.createNote(templates.note.noteId, "Thread",       threadContent("", today())),
-        trilium.createNote(templates.note.noteId, "Decision",     decisionContent("")),
-        trilium.createNote(templates.note.noteId, "Concept",      conceptContent("general")),
-        trilium.createNote(templates.note.noteId, "Project Brief",projectContent("", today())),
-        trilium.createNote(templates.note.noteId, "Person",       personContent("", "")),
-        trilium.createNote(templates.note.noteId, "Opinion",      opinionContent(today(), "contemplative")),
+        trilium.createNote(templates.note.noteId, "Thread",        threadContent("", today())),
+        trilium.createNote(templates.note.noteId, "Decision",      decisionContent("")),
+        trilium.createNote(templates.note.noteId, "Concept",       conceptContent("general")),
+        trilium.createNote(templates.note.noteId, "Project Brief", projectContent("", today())),
+        trilium.createNote(templates.note.noteId, "Person",        personContent("", "")),
+        trilium.createNote(templates.note.noteId, "Opinion",       opinionContent(today(), "contemplative")),
       ]);
-      created.templateThread      = tThread.note.noteId;
-      created.templateDecision    = tDecision.note.noteId;
-      created.templateConcept     = tConcept.note.noteId;
-      created.templateProjectBrief = tProject.note.noteId;
-      created.templatePerson      = tPerson.note.noteId;
-      created.templateOpinion     = tOpinion.note.noteId;
 
-      // ── Build constants.ts snippet ──────────────────────────────────────────
-      const constantsSnippet = `export const Brain = {
-  root: "${created.root}",
+      // ── Build and activate config ────────────────────────────────────────────
+      const newConfig = {
+        root: rootId,
+        identity: {
+          root: identity.note.noteId,
+          profile: profile.note.noteId,
+          preferences: preferences.note.noteId,
+          context: context.note.noteId,
+        },
+        workingMemory: {
+          root: wm.note.noteId,
+          inbox: inbox.note.noteId,
+          threads: threads.note.noteId,
+          decisions: decisions.note.noteId,
+          openQuestions: openQ.note.noteId,
+        },
+        knowledge: {
+          root: knowledge.note.noteId,
+          people: people.note.noteId,
+          organizations: orgs.note.noteId,
+          projects: projects.note.noteId,
+        },
+        opinions: opinions.note.noteId,
+        log: {
+          root: log.note.noteId,
+          sessions: sessions.note.noteId,
+          decisionsMade: decisionsMade.note.noteId,
+        },
+        templates: {
+          root: templates.note.noteId,
+          thread: tThread.note.noteId,
+          decision: tDecision.note.noteId,
+          concept: tConcept.note.noteId,
+          projectBrief: tProject.note.noteId,
+          person: tPerson.note.noteId,
+          opinion: tOpinion.note.noteId,
+        },
+      };
 
-  identity: {
-    root: "${created.identityRoot}",
-    profile: "${created.identityProfile}",
-    preferences: "${created.identityPreferences}",
-    context: "${created.identityContext}",
-  },
-
-  workingMemory: {
-    root: "${created.workingMemoryRoot}",
-    inbox: "${created.workingMemoryInbox}",
-    threads: "${created.workingMemoryThreads}",
-    decisions: "${created.workingMemoryDecisions}",
-    openQuestions: "${created.workingMemoryOpenQuestions}",
-  },
-
-  knowledge: {
-    root: "${created.knowledgeRoot}",
-    people: "${created.knowledgePeople}",
-    organizations: "${created.knowledgeOrganizations}",
-    projects: "${created.knowledgeProjects}",
-  },
-
-  opinions: "${created.opinions}",
-
-  log: {
-    root: "${created.logRoot}",
-    sessions: "${created.logSessions}",
-    decisionsMade: "${created.logDecisionsMade}",
-  },
-
-  templates: {
-    root: "${created.templatesRoot}",
-    thread: "${created.templateThread}",
-    decision: "${created.templateDecision}",
-    concept: "${created.templateConcept}",
-    projectBrief: "${created.templateProjectBrief}",
-    person: "${created.templatePerson}",
-    opinion: "${created.templateOpinion}",
-  },
-} as const;`;
+      // Write to disk and update the live config so all subsequent tool calls
+      // in this session use the new IDs immediately — no restart needed.
+      const savedPath = saveConfig(newConfig);
+      brainRef.config = newConfig;
 
       return txt({
         status: "initialized",
-        message: "Brain bootstrapped. Copy constants below into src/constants.ts then run: bun run build",
-        noteIds: created,
-        constants_ts: constantsSnippet,
+        message: `Brain bootstrapped. Config written to: ${savedPath}. Ready to use — no restart needed.`,
+        config: newConfig,
       });
     }
   );
