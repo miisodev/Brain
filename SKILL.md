@@ -11,7 +11,7 @@ Persistent memory that survives across sessions. Treat it as your own mind: read
 
 ## Architecture — Canonical Brain Tree
 
-Discovered at session start via `ignite_cortex`, which returns all structural IDs. IDs vary per installation — always use IDs returned by `ignite_cortex`, never hardcode them.
+Discovered at session start via `start_brain_session`, which returns all structural IDs. IDs vary per installation — always use IDs returned by `start_brain_session`, never hardcode them.
 
 ```
 Trilium Brain
@@ -28,31 +28,31 @@ Trilium Brain
 │   ├── People
 │   ├── Organizations
 │   ├── Projects
-│   └── [domain]/               — spawn_domain creates: Technology, Philosophy, Finance, etc.
-│       ├── Concepts/           — atomic definitions (spawn_concept places here)
+│   └── [domain]/               — create_domain creates: Technology, Philosophy, Finance, etc.
+│       ├── Concepts/           — atomic definitions (create_concept places here)
 │       ├── References/
 │       └── Notes/
 ├── Opinions                    — flat blog/diary entries; no subtrees
 ├── Log/                        — temporal record
 │   ├── Sessions
 │   └── Decisions Made
-└── Templates/                  — structural templates auto-wired by spawn_* tools
-    ├── Thread · Decision · Concept · Project Brief · Person · Opinion
+└── Templates/                  — structural templates auto-wired by create_* tools
+    ├── Thread · Decision · Concept · Project Brief · Person · Opinion · Domain
 ```
 
-**IDs to capture from `ignite_cortex` and use throughout the session:**
+**IDs to capture from `start_brain_session` and use throughout the session:**
 - Brain root, Identity root, Working Memory root → Inbox, Threads, Decisions, Open Questions IDs
 - Knowledge root → People, Organizations, Projects IDs
 - Opinions ID, Log root → Sessions, Decisions Made IDs
 - Templates root and all template note IDs
 
 **Structural rules — never violate:**
-- Thread notes → always under Working Memory → Threads (use `spawn_thread`)
-- Decision notes → always under Working Memory → Decisions (use `spawn_decision`)
+- Thread notes → always under Working Memory → Threads (use `create_thread`)
+- Decision notes → always under Working Memory → Decisions (use `create_decision`)
 - Open Questions → always under Working Memory → Open Questions; archive in place when resolved, never move
-- Concept notes → under Knowledge → [domain] → Concepts (use `spawn_concept` with domain)
-- Opinion notes → direct children of Opinions, never nested (use `spawn_opinion`)
-- Sessions → one per session under Log → Sessions (use `crystallize_session`)
+- Concept notes → under Knowledge → [domain] → Concepts (use `create_concept` with domain)
+- Opinion notes → direct children of Opinions, never nested (use `create_opinion`)
+- Sessions → one per session under Log → Sessions (use `log_session`)
 - Never store notes directly under Working Memory root or Knowledge root
 
 ---
@@ -61,43 +61,43 @@ Trilium Brain
 
 ### START — run in this exact order before responding
 
-1. `ignite_cortex` — once, first thing. Returns full tree + structural IDs. Capture all IDs. Never call again mid-session.
-2. `recall(query)` on the topic of the first message — always, before responding.
-3. `weave_thread(action="list")` — check open threads.
+1. `start_brain_session` — once, first thing. Returns full tree + structural IDs. Capture all IDs. Never call again mid-session.
+2. `recall_memory(query)` on the topic of the first message — always, before responding.
+3. `manage_thread(action="list")` — check open threads.
 
 ### DURING — write the moment something matters
 
 | Event | Action |
 |-------|--------|
-| Decision confirmed | `spawn_decision` → Working Memory → Decisions immediately |
-| Question surfaces unanswered | `encode_engram` under Open Questions immediately |
-| Opinion formed | `spawn_opinion` immediately |
-| Durable fact / concept | `spawn_concept` or `imprint(section="knowledge")` immediately |
-| User shares context about themselves | `reinforce` the relevant Identity note |
-| Question resolved | `reinforce` with resolution; `imprint_label(#status=resolved)`; `imprint_label(#archived)`; leave in place |
-| Decision superseded | `reinforce` old note; `spawn_decision` new; `synapse(new, supersedes, old)`; `imprint_label(old, #status=superseded)` |
-| Multi-session effort begins | `spawn_thread` immediately |
-| Thread has a new development | `weave_thread(action="append", entry=...)` |
-| Thread resolves | `weave_thread(action="close", resolution=...)` |
-| Thread yields reusable knowledge | `consolidate` it into Knowledge |
+| Decision confirmed | `create_decision` → Working Memory → Decisions immediately |
+| Question surfaces unanswered | `create_note` under Open Questions immediately |
+| Opinion formed | `create_opinion` immediately |
+| Durable fact / concept | `create_concept` or `store_memory(section="knowledge")` immediately |
+| User shares context about themselves | `update_memory` the relevant Identity note |
+| Question resolved | `update_memory` with resolution; `add_label(#status=resolved)`; `add_label(#archived)`; leave in place |
+| Decision superseded | `update_memory` old note; `create_decision` new; `add_relation(new, supersedes, old)`; `add_label(old, #status=superseded)` |
+| Multi-session effort begins | `create_thread` immediately |
+| Thread has a new development | `manage_thread(action="append", entry=...)` |
+| Thread resolves | `manage_thread(action="close", resolution=...)` |
+| Thread yields reusable knowledge | `promote_to_knowledge` it into Knowledge |
 | New inbox item captured | `triage_inbox(action="promote")` to correct section |
-| Relations implied | `synapse` immediately after creating or updating — never batch to later |
+| Relations implied | `add_relation` immediately after creating or updating — never batch to later |
 
 **Opinions:** Write whenever you form a real view — stance, reasoning, caveats. Don't sanitise.
 
 ### END — not complete until all three done
 
-1. `weave_thread(action="list")` → close resolved threads with real resolution summaries (not "done").
-2. `crystallize_session(summary=..., decisions=[], modified=[], openQuestions=[])` — one per session.
-3. `backup_cortex()` after any session that created or modified notes.
+1. `manage_thread(action="list")` → close resolved threads with real resolution summaries (not "done").
+2. `log_session(summary=..., decisions=[], modified=[], openQuestions=[])` — one per session.
+3. `create_backup()` after any session that created or modified notes.
 
 ---
 
 ## Label System
 
-All `spawn_*` and `imprint` tools auto-apply base labels. Add domain labels immediately after creation.
+All `create_*` and `store_memory` tools auto-apply base labels. Add domain labels immediately after creation.
 
-### Base labels (applied automatically by spawn_* / imprint)
+### Base labels (applied automatically by create_* / store_memory)
 
 | Label | Values |
 |-------|--------|
@@ -114,24 +114,24 @@ All `spawn_*` and `imprint` tools auto-apply base labels. Add domain labels imme
 | `#confidence` | `high` / `medium` / `low` | Epistemic certainty |
 | `#mood` | `contemplative` / `passionate` / `uncertain` / `analytical` | Opinion tone |
 | `#archived` | (flag, no value) | Resolved questions, superseded decisions — archive in place |
-| `#dateUpdated` | ISO date | Last modification (set every time you `reinforce`) |
+| `#dateUpdated` | ISO date | Last modification (set every time you `update_memory`) |
 | `#iconClass` | BoxIcons class string | UI icon — carry over from existing notes, don't invent |
 
-### Synaptic weight labels (managed by strengthen_synapse)
+### Synaptic weight labels (managed by strengthen_relation)
 
-`#sw_{synapseType}_{targetNoteId} = <integer>` — Hebbian reinforcement counter.  
-Call `strengthen_synapse` whenever you traverse a path you want to make more salient.
+`#sw_{relationName}_{targetNoteId} = <integer>` — Hebbian reinforcement counter.  
+Call `strengthen_relation` whenever you traverse a path you want to make more salient.
 
 ---
 
-## Relation (Synapse) System
+## Relation System
 
 Wire immediately after creating or updating. Use the most specific type available. Never batch to later.
 
-### Canonical synapse vocabulary
+### Canonical relation vocabulary
 
-| Synapse | Direction | Use when |
-|---------|-----------|----------|
+| Relation | Direction | Use when |
+|----------|-----------|----------|
 | `relatesTo` | A → B | Generic connection — last resort when nothing more specific fits |
 | `extends` | A → B | A elaborates, expands, or builds on B |
 | `contradicts` | A → B | A conflicts with or undermines B |
@@ -165,7 +165,7 @@ Wire immediately after creating or updating. Use the most specific type availabl
 **Working Memory lifecycle:**
 - Decision → `extends` → Thread it resolved
 - Decision → `supports` → Question it answered
-- Knowledge engram → `derivedFrom` → Thread (via `consolidate`)
+- Knowledge note → `derivedFrom` → Thread (via `promote_to_knowledge`)
 
 **Knowledge structure:**
 - Domain concept → `partOf` → domain folder
@@ -181,7 +181,7 @@ Wire immediately after creating or updating. Use the most specific type availabl
 
 ## Note Format Templates
 
-All notes use structured HTML. These formats mirror what `spawn_*` tools generate — use them when writing manually or via `encode_engram` / `imprint`.
+All notes use structured HTML. These formats mirror what `create_*` tools generate — use them when writing manually or via `create_note` / `store_memory`.
 
 ### Thread
 ```html
@@ -209,7 +209,7 @@ All notes use structured HTML. These formats mirror what `spawn_*` tools generat
 <hr>
 <h2>Domain</h2><p>[domain]</p>
 <h2>Examples</h2><ul><li>[Example]</li></ul>
-<h2>Related Concepts</h2><p><em>— wire via synapse tool —</em></p>
+<h2>Related Concepts</h2><p><em>— wire via add_relation tool —</em></p>
 <h2>Notes</h2><p></p>
 ```
 
@@ -236,14 +236,14 @@ All notes use structured HTML. These formats mirror what `spawn_*` tools generat
 
 ## Deduplication
 
-Before creating any engram:
+Before creating any note:
 ```
-recall(query=<topic keywords>)
-  → Match found:  reinforce — do not create a duplicate
-  → No match:     proceed with spawn_* or imprint
+recall_memory(query=<topic keywords>)
+  → Match found:  update_memory — do not create a duplicate
+  → No match:     proceed with create_* or store_memory
 ```
 
-Duplicates found: read both, merge into the more complete, `dissolve_engram` the redundant, verify relations on survivor.
+Duplicates found: read both, merge into the more complete, `delete_note` the redundant, verify relations on survivor.
 
 ---
 
@@ -252,27 +252,27 @@ Duplicates found: read both, merge into the more complete, `dissolve_engram` the
 **On creation:**
 - [ ] Correct structural location per architecture above
 - [ ] `#noteType` and `#topic` present
-- [ ] At least one typed synapse wired (unless the note is a structural container)
+- [ ] At least one typed relation wired (unless the note is a structural container)
 - [ ] Structured HTML — no prose blobs for anything except Opinions
-- [ ] `~template` relation auto-wired by spawn_* — verify it's there with `retrieve_engram`
+- [ ] `~template` relation auto-wired by create_* — verify it's there with `get_note`
 
 **On update:**
-- [ ] Use `reinforce` (auto-snapshots) not `rewrite_engram` unless you've called `snapshot_engram` first
-- [ ] `imprint_label(noteId, "dateUpdated", today)` every time
-- [ ] If superseding: `reinforce` old body + `#status=superseded` + `#archived`, spawn new, wire `supersedes`
+- [ ] Use `update_memory` (auto-snapshots) not `update_note_content` unless you've called `create_note_revision` first
+- [ ] `add_label(noteId, "dateUpdated", today)` every time
+- [ ] If superseding: `update_memory` old body + `#status=superseded` + `#archived`, create new, wire `supersedes`
 
 **Anti-patterns — never:**
 - Store a note directly under the Working Memory root or Knowledge root
-- Create a concept without a domain — always use `spawn_concept(domain=...)`
-- Create a duplicate — `recall` first, `reinforce` if found
-- Call `crystallize_session` twice for the same session — check with `scan_engrams` for existing sessions first
+- Create a concept without a domain — always use `create_concept(domain=...)`
+- Create a duplicate — `recall_memory` first, `update_memory` if found
+- Call `log_session` twice for the same session — check with `search_notes` for existing sessions first
 - Leave a resolved question without `#status=resolved` + `#archived`
 - Move a resolved question — archive in place
 - Close a thread with "done" — requires a real resolution summary
-- Open a thread for a single-session task — just use Working Memory → Inbox or a quick engram
-- Wire only `relatesTo` when a more specific synapse fits
-- Use `rewrite_engram` on important notes without calling `snapshot_engram` first
-- Hard-delete with `dissolve_engram` — prefer `imprint_label(#archived)` for knowledge notes
+- Open a thread for a single-session task — just use Working Memory → Inbox or a quick note
+- Wire only `relatesTo` when a more specific relation fits
+- Use `update_note_content` on important notes without calling `create_note_revision` first
+- Hard-delete with `delete_note` — prefer `add_label(#archived)` for knowledge notes
 
 ---
 
@@ -281,106 +281,110 @@ Duplicates found: read both, merge into the more complete, `dissolve_engram` the
 ### Session / Orientation
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `ignite_cortex` | `()` | Boot session. Returns 3-level tree + all structural IDs. Once per session. |
-| `crystallize_session` | `(summary, title?, decisions?, modified?, openQuestions?, date?)` | Persist session to Log → Sessions. |
+| `start_brain_session` | `()` | Boot session. Returns 3-level tree + all structural IDs. Once per session. |
+| `log_session` | `(summary, title?, decisions?, modified?, openQuestions?, date?)` | Persist session to Log → Sessions. |
+| `get_brain_config` | `()` | Return current brain config (all IDs) without API calls. |
 
 ### Search
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `scan_engrams` | `(query, ancestorNoteId?, limit?, fastSearch?, orderBy?, ...)` | Full Trilium query: text, `#label=value`, date ops, subtree scope. |
-| `trace_signal` | `(labelName, labelValue?, ancestorNoteId?, limit?)` | Fast `#label=value` lookup. Best for structured retrieval. |
-| `pulse_recent` | `(ancestorNoteId?)` | Up to 50 recently modified engrams, newest first. |
+| `search_notes` | `(query, ancestorNoteId?, limit?, fastSearch?, orderBy?, debug?, ...)` | Full Trilium query: text, `#label=value`, date ops, subtree scope. |
+| `search_notes_by_label` | `(labelName, labelValue?, ancestorNoteId?, limit?)` | Fast `#label=value` lookup. Best for structured retrieval. |
+| `get_recent_notes` | `(ancestorNoteId?)` | Up to 50 recently modified notes, newest first. |
 
-### Engram CRUD
+### Note CRUD
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `retrieve_engram` | `(noteId)` | Metadata + attributes, no content. Inspect before acting. |
-| `decode_engram` | `(noteId)` | Body only. |
-| `read_engram` | `(noteId)` | Metadata + body. When you need to read then immediately act. |
-| `encode_engram` | `(parentNoteId, title, content, type?, mime?)` | Create raw note. Use spawn_* for structured types. |
-| `rewrite_engram` | `(noteId, content)` | Replace body. Call `snapshot_engram` first for important notes. |
-| `morph_engram` | `(noteId, title?, type?, mime?)` | Rename or reclassify without touching content. |
-| `dissolve_engram` | `(noteId)` | Hard delete. Prefer `#archived` label for knowledge notes. |
+| `get_note` | `(noteId)` | Metadata + attributes, no content. Inspect before acting. |
+| `get_note_content` | `(noteId)` | Body only. |
+| `get_note_with_content` | `(noteId)` | Metadata + body. When you need to read then immediately act. |
+| `create_note` | `(parentNoteId, title, content, type?, mime?)` | Create raw note. Use create_* for structured types. |
+| `update_note_content` | `(noteId, content)` | Replace body. Call `create_note_revision` first for important notes. |
+| `patch_note` | `(noteId, title?, type?, mime?)` | Rename or reclassify without touching content. |
+| `delete_note` | `(noteId)` | Hard delete. Prefer `#archived` label for knowledge notes. |
 
 ### Structure / Branching
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `graft_engram` | `(noteId, parentNoteId, prefix?)` | Multi-parent placement. Shared content, not a copy. |
-| `migrate_engram` | `(noteId, fromParentNoteId, toParentNoteId)` | Move to new parent. |
+| `clone_note` | `(noteId, parentNoteId, prefix?)` | Multi-parent placement. Shared content, not a copy. |
+| `move_note` | `(noteId, fromParentNoteId, toParentNoteId)` | Move to new parent. |
 
-### Synaptic Attributes
+### Attributes
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `imprint_label` | `(noteId, name, value?, isInheritable?)` | Add `#name=value` label. |
-| `synapse` | `(fromNoteId, synapseType, toNoteId, bidirectional?)` | Wire typed relation. |
-| `desynapse` | `(fromNoteId, synapseType, toNoteId)` | Remove named relation by endpoint pair. |
-| `prune_attribute` | `(attributeId)` | Remove any attribute by raw attributeId. |
-| `strengthen_synapse` | `(fromNoteId, synapseType, toNoteId)` | Increment Hebbian weight (+1 per call). |
-| `list_synapse_types` | `(ancestorNoteId?)` | Discover all relation type names in use. |
-| `query_synapses` | `(noteId, synapseType, direction?)` | Notes connected via a specific synapse type. |
+| `add_label` | `(noteId, name, value?, isInheritable?)` | Add `#name=value` label. |
+| `update_label` | `(attributeId, value)` | Update label value in place (atomic). |
+| `add_relation` | `(fromNoteId, relationName, toNoteId, bidirectional?, isInheritable?)` | Wire typed relation. |
+| `delete_relation` | `(fromNoteId, relationName, toNoteId)` | Remove named relation by endpoint pair. |
+| `delete_attribute` | `(attributeId)` | Remove any attribute by raw attributeId. |
+| `strengthen_relation` | `(fromNoteId, relationName, toNoteId)` | Increment Hebbian weight (+1 per call). |
+| `get_relation_types` | `(ancestorNoteId?)` | Discover all relation type names in use. |
+| `get_related_notes` | `(noteId, relationName, direction?)` | Notes connected via a specific relation type. |
 
-### Graph / Connectome
+### Graph Traversal
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `trace_efferents` | `(noteId)` | Outgoing relations + synaptic weights. One hop. |
-| `trace_afferents` | `(noteId)` | Incoming relations (backlinks). One hop. |
-| `find_neural_path` | `(fromNoteId, toNoteId, maxDepth?)` | Shortest BFS path between two engrams. |
-| `expand_neighborhood` | `(noteId, depth?, relationType?)` | All engrams within N hops (center at depth=0). |
-| `traverse_connectome` | `(noteId, direction?, relationType?, maxDepth?, maxNodes?)` | Full graph walk with controls. |
+| `get_outgoing_relations` | `(noteId)` | Outgoing relations + weights. One hop. |
+| `get_incoming_relations` | `(noteId)` | Incoming relations (backlinks). One hop. |
+| `find_relation_path` | `(fromNoteId, toNoteId, maxDepth?)` | Shortest BFS path between two notes. |
+| `get_note_neighborhood` | `(noteId, depth?, relationType?)` | All notes within N hops (center at depth=0). |
+| `traverse_graph` | `(noteId, direction?, relationType?, maxDepth?, maxNodes?)` | Full graph walk with controls. |
 
-### Structured Spawn
+### Structured Note Creation
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `spawn_thread` | `(title, context?, topic?, date?)` | Reasoning thread in Working Memory → Threads. |
-| `spawn_decision` | `(title, context?, topic?, date?)` | ADR decision record in Working Memory → Decisions. |
-| `spawn_concept` | `(title, domain, domainNoteId?, topic?)` | Atomic concept under Knowledge → [domain] → Concepts. |
-| `spawn_domain` | `(name)` | New domain subtree (Concepts / References / Notes). |
-| `spawn_opinion` | `(title, mood?, topics?, date?)` | Blog/diary opinion under Opinions (flat). |
-| `spawn_project` | `(title, goal?, topic?, date?)` | Project brief under Knowledge → Projects. |
+| `create_thread` | `(title, context?, topic?, date?)` | Reasoning thread in Working Memory → Threads. |
+| `create_decision` | `(title, context?, topic?, date?)` | ADR decision record in Working Memory → Decisions. |
+| `create_concept` | `(title, domain, domainNoteId?, topic?)` | Atomic concept under Knowledge → [domain] → Concepts. |
+| `create_domain` | `(name)` | New domain subtree (Concepts / References / Notes). |
+| `create_opinion` | `(title, mood?, topics?, date?)` | Blog/diary opinion under Opinions (flat). |
+| `create_project` | `(title, goal?, topic?, date?)` | Project brief under Knowledge → Projects. |
 
 ### Memory / Recall
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `recall` | `(query, section?, limit?)` | Scoped search with inline snippets for top 3. Always use before creating. |
-| `imprint` | `(section, title, content, topic?, subsectionId?)` | Persist engram with auto-labels. |
-| `reinforce` | `(noteId, content, title?)` | Pre-snapshots then overwrites. Use for all knowledge updates. |
-| `weave_thread` | `(action, noteId?, entry?, resolution?, date?)` | `append / close / list` thread lifecycle. |
+| `recall_memory` | `(query, section?, limit?)` | Scoped search with inline snippets for top 3. Always use before creating. |
+| `store_memory` | `(section, title, content, topic?, subsectionId?)` | Persist note with auto-labels. |
+| `update_memory` | `(noteId, content, title?)` | Pre-snapshots then overwrites. Use for all knowledge updates. |
+| `manage_thread` | `(action, noteId?, entry?, resolution?, date?)` | `append / close / list` thread lifecycle. |
 | `triage_inbox` | `(action, noteId?, targetSection?, targetNoteId?)` | `list / promote / discard` inbox items. |
-| `consolidate` | `(sourceNoteId, targetTitle?, domain?, domainNoteId?, closeSource?)` | Promote Working Memory to Knowledge. Wires `~derivedFrom`. |
+| `promote_to_knowledge` | `(sourceNoteId, targetTitle?, domain?, domainNoteId?, closeSource?)` | Promote Working Memory to Knowledge. Wires `~derivedFrom`. |
 
 ### Maintenance
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `scan_orphans` | `(ancestorNoteId?, limit?)` | Disconnected engrams — no relations, no meaningful labels. |
-| `suggest_synapses` | `(noteId, ancestorNoteId?, limit?)` | Candidate connections by shared label overlap. |
-| `bulk_imprint` | `(noteIds, labelName, labelValue?, isInheritable?)` | Batch-label multiple engrams. |
+| `find_orphan_notes` | `(ancestorNoteId?, limit?)` | Disconnected notes — no relations, no meaningful labels. |
+| `suggest_connections` | `(noteId, ancestorNoteId?, limit?)` | Candidate connections by shared label overlap. |
+| `bulk_add_label` | `(noteIds, labelName, labelValue?, isInheritable?)` | Batch-label multiple notes. |
 
-### Artifacts
+### Attachments
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `list_artifacts` | `(noteId)` | List attachments on an engram. |
-| `read_artifact` | `(attachmentId)` | Read attachment content. |
-| `attach_artifact` | `(ownerId, title, mime, content, role?)` | Attach file or text blob. |
+| `get_note_attachments` | `(noteId)` | List attachments on a note. |
+| `get_attachment_content` | `(attachmentId)` | Read attachment content. |
+| `create_attachment` | `(ownerId, title, mime, content, role?)` | Attach file or text blob. |
+| `delete_attachment` | `(attachmentId)` | Permanently delete an attachment. |
+| `update_attachment` | `(attachmentId, title?, mime?)` | Update attachment title or MIME type. |
 
-### Snapshots
+### Revisions
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `list_snapshots` | `(noteId)` | All saved revisions, newest first. |
-| `read_snapshot` | `(revisionId)` | Content of a historical revision. |
-| `snapshot_engram` | `(noteId)` | Manually save revision before significant edits. |
+| `get_note_revisions` | `(noteId)` | All saved revisions, newest first. |
+| `get_revision_content` | `(revisionId)` | Content of a historical revision. |
+| `create_note_revision` | `(noteId)` | Manually save revision before significant edits. |
 
-### Calendar Pulses
+### Calendar Notes
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `get_day_pulse` | `(date?)` | Get/create today's journal day note. |
-| `get_week_pulse` | `(week)` | Get/create week note (YYYY-Www). |
-| `get_month_pulse` | `(month)` | Get/create month note (YYYY-MM). |
-| `get_year_pulse` | `(year)` | Get/create year note (YYYY). |
-| `get_inbox_pulse` | `(date?)` | Get Trilium calendar inbox for a date. |
+| `get_day_note` | `(date?)` | Get/create today's journal day note. |
+| `get_week_note` | `(week)` | Get/create week note (YYYY-Www). |
+| `get_month_note` | `(month)` | Get/create month note (YYYY-MM). |
+| `get_year_note` | `(year)` | Get/create year note (YYYY). |
+| `get_inbox_note` | `(date?)` | Get Trilium calendar inbox for a date. |
 
 ### System
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `synaptic_status` | `()` | Trilium server + DB version. Diagnostics. |
-| `backup_cortex` | `(date?)` | Trigger named DB backup. Call at end of significant sessions. |
+| `get_app_info` | `()` | Trilium server + DB version. Diagnostics. |
+| `create_backup` | `(date?)` | Trigger named DB backup. Call at end of significant sessions. |
 | `bootstrap_brain` | `()` | Init or inspect brain hierarchy. Writes brain.json. Activates live. |
