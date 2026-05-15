@@ -1,13 +1,9 @@
-export const Trilium = {
-  root: "7lwsFLeDEFNy",
-  identity: "6KWw8MmwS356",
-  workingMemory: {
-    root: "RO4UtYm8802k",
-    activeThreads: "VLUE2DiGVVkX",
-    decisions: "HyN4NpBRUhVl",
-    openQuestions: "tkJaIc0ZvXY4",
-  },
-  knowledge: "w9lPh53pDpqr",
-  opinions: "qLJItiCeW41p",
-  log: "ckp5gZYtkNFL",
-} as const;
+// ─────────────────────────────────────────────────────────────────────────────
+// Trilium Brain — legacy constants shim
+//
+// Brain structure IDs are now stored in brain.json at runtime.
+// This file exists only for the test suite and any tooling that imports Brain.
+// The authoritative source is src/config.ts + brain.json.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export { EMPTY_BRAIN as Brain } from "./config.js";
