@@ -1,6 +1,6 @@
 {
-  "name": "brain",
-  "version": "2.0.0",
+  "name": "trilium-brain",
+  "version": "3.0.0",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun",

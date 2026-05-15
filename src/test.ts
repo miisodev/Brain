@@ -5,7 +5,7 @@
  */
 
 import { TriliumClient } from "./trilium.js";
-import { Trilium } from "./constants.js";
+import { Brain as Trilium } from "./constants.js";
 
 const baseUrl = process.env.TRILIUM_BASE_URL;
 const token = process.env.TRILIUM_ETAPI_TOKEN;
@@ -50,7 +50,7 @@ try {
 // ── Note CRUD ─────────────────────────────────────────────────────────────────
 let testNoteId = "";
 try {
-  const r = await trilium.createNote(Trilium.knowledge, "MCP Test Note", "<p>Test content.</p>");
+  const r = await trilium.createNote(Trilium.knowledge.root, "MCP Test Note", "<p>Test content.</p>");
   testNoteId = r.note.noteId;
   cleanup.push(testNoteId);
   pass("createNote", `id=${testNoteId}`);
@@ -153,7 +153,7 @@ if (testNoteId) {
 let cloneNoteId = "";
 if (testNoteId) {
   try {
-    const r = await trilium.createNote(Trilium.knowledge, "Clone Source", "to be cloned");
+    const r = await trilium.createNote(Trilium.knowledge.root, "Clone Source", "to be cloned");
     cloneNoteId = r.note.noteId;
     cleanup.push(cloneNoteId);
     const branch = await trilium.cloneNote(cloneNoteId, Trilium.opinions);

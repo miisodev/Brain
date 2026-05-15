@@ -1,166 +1,262 @@
 /**
- * tools.ts — MCP tool registrations for the Trilium brain server.
+ * tools.ts — Trilium Brain MCP tool registrations
  *
- * TOKEN ECONOMY PHILOSOPHY
- * ────────────────────────
- * Every tool returns the *minimum* data needed for the LLM to act.
- * • List/search tools → id + title (+ type where useful). No content.
- * • Single-note tools → metadata + content only when explicitly requested.
- * • Write tools → echo back only the created/changed identifiers.
- * • Bulk operations accept arrays so the LLM can batch in one call.
- * This keeps context windows lean without losing any capability.
+ * TOKEN ECONOMY
+ * ─────────────
+ * • List / search → id + title only. No content.
+ * • Single-note retrieval → metadata OR content, not both, unless read_engram is used.
+ * • Write tools → return only changed / created identifiers.
+ * • Bulk tools accept arrays so the LLM batches in one call.
+ *
+ * NAMING SCHEME
+ * ─────────────
+ * Tool names follow a neurology + sci-fi + AI vocabulary:
+ *   engram     = a memory unit (note)
+ *   synapse    = a typed relation (edge in the knowledge graph)
+ *   cortex     = the session / orientation layer
+ *   connectome = the full relation graph
+ *   efferent   = outgoing signal (from a node)
+ *   afferent   = incoming signal (to a node)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { TriliumClient } from "./trilium.js";
-import { Trilium } from "./constants.js";
+import { Brain } from "./constants.js";
+import { SynapseTypes } from "./types.js";
+import {
+  threadContent,
+  decisionContent,
+  conceptContent,
+  personContent,
+  projectContent,
+  opinionContent,
+  domainContent,
+  sessionContent,
+} from "./templates.js";
 
-// ── Shared mini-mappers (compact output shapes) ────────────────────────────
+// ── Output shape helpers ───────────────────────────────────────────────────────
 
-const noteStub   = (n: { noteId: string; title: string; type?: string }) =>
-  ({ id: n.noteId, title: n.title, ...(n.type ? { type: n.type } : {}) });
+const noteStub = (n: { noteId: string; title: string; type?: string }) => ({
+  id: n.noteId,
+  title: n.title,
+  ...(n.type ? { type: n.type } : {}),
+});
 
-const attrStub   = (a: { attributeId: string; noteId: string; type: string; name: string; value: string }) =>
-  ({ id: a.attributeId, noteId: a.noteId, type: a.type, name: a.name, value: a.value });
+const attrStub = (a: { attributeId: string; noteId: string; type: string; name: string; value: string }) => ({
+  id: a.attributeId,
+  noteId: a.noteId,
+  type: a.type,
+  name: a.name,
+  value: a.value,
+});
 
-const branchStub = (b: { branchId: string; noteId: string; parentNoteId: string }) =>
-  ({ id: b.branchId, noteId: b.noteId, parentNoteId: b.parentNoteId });
+const branchStub = (b: { branchId: string; noteId: string; parentNoteId: string }) => ({
+  id: b.branchId,
+  noteId: b.noteId,
+  parentNoteId: b.parentNoteId,
+});
 
-const revStub    = (r: { revisionId: string; noteId: string; title: string; utcDateCreated: string; contentLength: number }) =>
-  ({ id: r.revisionId, noteId: r.noteId, title: r.title, date: r.utcDateCreated, size: r.contentLength });
+const revStub = (r: { revisionId: string; noteId: string; title: string; utcDateCreated: string; contentLength: number }) => ({
+  id: r.revisionId,
+  noteId: r.noteId,
+  title: r.title,
+  date: r.utcDateCreated,
+  size: r.contentLength,
+});
 
-const attachStub = (a: { attachmentId: string; title: string; mime: string; contentLength: number }) =>
-  ({ id: a.attachmentId, title: a.title, mime: a.mime, size: a.contentLength });
+const attachStub = (a: { attachmentId: string; title: string; mime: string; contentLength: number }) => ({
+  id: a.attachmentId,
+  title: a.title,
+  mime: a.mime,
+  size: a.contentLength,
+});
 
 const txt = (obj: unknown) => ({
   content: [{ type: "text" as const, text: typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) }],
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// REGISTRATION
-// ──────────────────────────────────────────────────────────────────────────────
+const today = () => new Date().toISOString().slice(0, 10);
+
+// ── Registration ───────────────────────────────────────────────────────────────
 
 export function registerTools(server: McpServer, trilium: TriliumClient): void {
 
-  // ── SESSION / ORIENTATION ──────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // SESSION / ORIENTATION
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "start_session",
-    `Orient the LLM at session start. Returns a compact two-level tree of the Trilium root so
-the model knows what note IDs exist before taking any action. Call this once at the beginning
-of every session; avoid re-calling it mid-session to save tokens.`,
+    "ignite_cortex",
+    `Boot the Trilium Brain session. Returns the full three-level brain tree with note IDs
+for every structural node so the model can navigate without further round-trips.
+Call ONCE at the start of every session. Never repeat mid-session.
+
+Returns: { id, title, noteType, children[] } — three levels deep.`,
     {},
     async () => {
-      const root = await trilium.getNote(Trilium.root);
+      const root = await trilium.getNote(Brain.root);
       const children = await Promise.all(
         root.childNoteIds.map(async (cid) => {
           const child = await trilium.getNote(cid);
           const grandchildren = await Promise.all(
             child.childNoteIds.map(async (gcid) => {
               const gc = await trilium.getNote(gcid);
-              return { id: gc.noteId, title: gc.title };
+              const great = await Promise.all(
+                gc.childNoteIds.slice(0, 10).map(async (ggid) => {
+                  const gg = await trilium.getNote(ggid);
+                  return { id: gg.noteId, title: gg.title };
+                })
+              );
+              return { id: gc.noteId, title: gc.title, ...(great.length ? { children: great } : {}) };
             })
           );
-          return { id: child.noteId, title: child.title, children: grandchildren };
+          return {
+            id: child.noteId,
+            title: child.title,
+            ...(grandchildren.length ? { children: grandchildren } : {}),
+          };
         })
       );
-      return txt({ id: root.noteId, title: root.title, children });
+      return txt({
+        id: root.noteId,
+        title: root.title,
+        children,
+        structuralIds: {
+          identity: Brain.identity,
+          workingMemory: Brain.workingMemory,
+          knowledge: Brain.knowledge,
+          opinions: Brain.opinions,
+          log: Brain.log,
+          templates: Brain.templates,
+        },
+      });
     }
   );
 
   server.tool(
-    "log_session",
-    `Persist a plain-text summary of what happened this session into the Log section.
-Call at the end of every session. The summary becomes durable memory for future sessions.
-Keep it factual: decisions made, notes created/modified, open questions left.`,
+    "crystallize_session",
+    `Persist a structured session summary into Log → Sessions. Call at the end of every session.
+Creates a properly formatted session note with summary, decisions, modified notes, and open questions.
+Returns the new session noteId.`,
     {
-      summary: z.string().describe("Plain-text summary of this session's activity"),
-      date: z.string().optional().describe("ISO date YYYY-MM-DD (defaults to today)"),
+      title: z.string().optional().describe("Session title (default: YYYY-MM-DD)"),
+      summary: z.string().describe("What happened this session — factual, concise"),
+      decisions: z.array(z.string()).optional().describe("Decisions made (list of strings)"),
+      modified: z.array(z.string()).optional().describe("Note titles created or modified"),
+      openQuestions: z.array(z.string()).optional().describe("Unresolved questions carried forward"),
+      date: z.string().optional().describe("ISO date YYYY-MM-DD (default: today)"),
     },
-    async ({ summary, date }) => {
-      const title = date ?? new Date().toISOString().slice(0, 10);
-      const result = await trilium.createNote(Trilium.log, title, summary);
-      return txt({ noteId: result.note.noteId, title: result.note.title });
+    async ({ title, summary, decisions, modified, openQuestions, date }) => {
+      const d = date ?? today();
+      const sessionTitle = title ?? d;
+      const parentId = Brain.log.sessions || Brain.log.root;
+
+      // Build structured HTML content
+      let html = `<p><strong>Date:</strong> ${d}</p>`;
+      html += `<h2>Summary</h2><p>${summary}</p>`;
+
+      if (decisions?.length) {
+        html += `<h2>Decisions Made</h2><ul>${decisions.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+      }
+      if (modified?.length) {
+        html += `<h2>Notes Modified</h2><ul>${modified.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+      }
+      if (openQuestions?.length) {
+        html += `<h2>Open Questions</h2><ul>${openQuestions.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+      }
+
+      const result = await trilium.createNote(parentId, sessionTitle, html);
+      const nid = result.note.noteId;
+      await trilium.addLabel(nid, "noteType", "session");
+      await trilium.addLabel(nid, "sessionDate", d);
+      return txt({ noteId: nid, title: sessionTitle, parentId });
     }
   );
 
-  // ── SEARCH ────────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // SCAN / SEARCH
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "search_notes",
-    `Full-power Trilium search. Supports:
+    "scan_engrams",
+    `Full-power search across the brain. Supports Trilium's native query language:
   • Plain text: "machine learning"
-  • Label filter: #topic=AI, #status!=done
-  • Date operators: #dateModified =* MONTH, #dateCreated >= 2026-01-01
-  • Ancestor scope: limit to a subtree via ancestorNoteId
-  • Ordering: orderBy + orderDirection (asc/desc)
-  • fastSearch=true skips full-text body scan (much faster for label-only queries)
-Returns only id+title+type — call get_note for full content.`,
+  • Label filter: #topic=AI  |  #status!=done  |  #noteType=concept
+  • Date operators: #dateModified =* MONTH  |  #dateCreated >= 2026-01-01
+  • Scope: ancestorNoteId limits search to a subtree
+  • fastSearch=true skips body scan (much faster for label-only queries)
+Returns id+title+type stubs only — call decode_engram or read_engram for content.`,
     {
       query: z.string().describe("Trilium search query"),
       ancestorNoteId: z.string().optional().describe("Limit to this subtree"),
-      ancestorDepth: z.string().optional().describe("Depth filter e.g. eq1, lt3, gt2"),
-      limit: z.number().optional().describe("Max results (default: unlimited)"),
-      orderBy: z.string().optional().describe("Field: title, dateModified, dateCreated, etc."),
-      orderDirection: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
+      ancestorDepth: z.string().optional().describe("Depth filter: eq1, lt3, gt2"),
+      limit: z.number().optional().describe("Max results"),
+      orderBy: z.string().optional().describe("Sort field: title, dateModified, dateCreated"),
+      orderDirection: z.enum(["asc", "desc"]).optional(),
       fastSearch: z.boolean().optional().describe("Skip content body scan"),
-      includeArchivedNotes: z.boolean().optional().describe("Include archived notes"),
+      includeArchived: z.boolean().optional().describe("Include archived notes"),
     },
-    async ({ query, ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection, fastSearch, includeArchivedNotes }) => {
+    async ({ query, ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection, fastSearch, includeArchived }) => {
       const result = await trilium.searchNotes(query, {
-        ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection, fastSearch, includeArchivedNotes,
+        ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection,
+        fastSearch, includeArchivedNotes: includeArchived,
       });
       return txt(result.results.map(noteStub));
     }
   );
 
   server.tool(
-    "search_by_label",
-    `Find notes by label name and optional exact value. Shorthand for search_notes with #label syntax.
-More concise than constructing the query manually.
-Examples: labelName="topic" labelValue="AI" → finds all #topic=AI notes.`,
+    "trace_signal",
+    `Find engrams by label name and optional exact value.
+Shorthand for scan_engrams with #label syntax. Use for structured retrieval.
+Examples: labelName="noteType" labelValue="decision" → all decision records.`,
     {
       labelName: z.string().describe("Label name (no # prefix)"),
       labelValue: z.string().optional().describe("Exact value to match"),
-      ancestorNoteId: z.string().optional().describe("Limit to this subtree"),
-      limit: z.number().optional().describe("Max results"),
+      ancestorNoteId: z.string().optional().describe("Scope to subtree"),
+      limit: z.number().optional().describe("Max results (default: 50)"),
     },
     async ({ labelName, labelValue, ancestorNoteId, limit }) => {
       const query = labelValue != null ? `#${labelName}=${labelValue}` : `#${labelName}`;
-      const result = await trilium.searchNotes(query, { ancestorNoteId, limit, fastSearch: true });
+      const result = await trilium.searchNotes(query, {
+        ancestorNoteId, limit: limit ?? 50, fastSearch: true,
+      });
       return txt(result.results.map(noteStub));
     }
   );
 
   server.tool(
-    "get_recent_changes",
-    `Return the most recently created/modified notes across the whole tree (or a subtree).
-Useful for resuming context after a gap: "what changed since last session?"
-Returns id+title+date triples, ordered newest-first (up to 50 entries).`,
+    "pulse_recent",
+    `Return the most recently modified engrams (up to 50), newest-first.
+Use to resume context after a gap: "what changed since last session?"
+Returns id+title+date triples. Optionally scoped to a subtree.`,
     {
-      ancestorNoteId: z.string().optional().describe("Scope to this subtree (default: entire tree)"),
+      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: entire brain)"),
     },
     async ({ ancestorNoteId }) => {
       const changes = await trilium.getNoteHistory(ancestorNoteId);
-      // deduplicate by noteId, keep first (most recent) occurrence
       const seen = new Set<string>();
-      const deduped = changes.filter((c) => {
-        if (seen.has(c.noteId)) return false;
-        seen.add(c.noteId);
-        return true;
-      }).slice(0, 50);
-      return txt(deduped.map((c) => ({ noteId: c.noteId, title: c.current_title, date: c.utcDate })));
+      const deduped = changes
+        .filter((c) => {
+          if (seen.has(c.noteId)) return false;
+          seen.add(c.noteId);
+          return !c.current_isDeleted;
+        })
+        .slice(0, 50);
+      return txt(deduped.map((c) => ({ id: c.noteId, title: c.current_title, date: c.utcDate })));
     }
   );
 
-  // ── NOTE CRUD ─────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // ENGRAM CRUD
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "get_note",
-    `Get full metadata for a note: id, title, type, mime, attributes, parent/child IDs, dates.
-Does NOT return content — call get_note_content separately if needed.
-Use this to inspect relations, labels, and structure before acting.`,
+    "retrieve_engram",
+    `Get full metadata for an engram: id, title, type, mime, attributes (labels + relations),
+parent/child IDs, dates. Does NOT return content — call decode_engram separately.
+Use to inspect structure, labels, and relations before acting.`,
     { noteId: z.string().describe("Note ID") },
     async ({ noteId }) => {
       const note = await trilium.getNote(noteId);
@@ -180,9 +276,9 @@ Use this to inspect relations, labels, and structure before acting.`,
   );
 
   server.tool(
-    "get_note_content",
-    `Return the raw content of a note. For text notes this is HTML; for code notes it is plain text.
-Only call this when you actually need to read or reason over the body — saves tokens vs always bundling metadata+content.`,
+    "decode_engram",
+    `Return the raw content of an engram. Text notes return HTML; code notes return plain text.
+Only call when you need to reason over the body — keeps context lean.`,
     { noteId: z.string().describe("Note ID") },
     async ({ noteId }) => {
       const content = await trilium.getNoteContent(noteId);
@@ -191,12 +287,15 @@ Only call this when you actually need to read or reason over the body — saves 
   );
 
   server.tool(
-    "get_note_with_content",
-    `Get both metadata and content for a note in a single call.
-Use when you need to read AND act on the note (e.g. update it). For read-only inspection prefer get_note.`,
+    "read_engram",
+    `Get both metadata AND content in one call.
+Use when you need to read then immediately act (e.g. update). For inspection only, prefer retrieve_engram.`,
     { noteId: z.string().describe("Note ID") },
     async ({ noteId }) => {
-      const [note, content] = await Promise.all([trilium.getNote(noteId), trilium.getNoteContent(noteId)]);
+      const [note, content] = await Promise.all([
+        trilium.getNote(noteId),
+        trilium.getNoteContent(noteId),
+      ]);
       return txt({
         id: note.noteId,
         title: note.title,
@@ -211,16 +310,17 @@ Use when you need to read AND act on the note (e.g. update it). For read-only in
   );
 
   server.tool(
-    "create_note",
-    `Create a new note. Supported types: text, code, book, canvas, mermaid, relationMap, render, search, file, image.
-For code notes specify mime e.g. "application/javascript", "text/x-python", "text/x-sql".
-Returns the new noteId and branchId only.`,
+    "encode_engram",
+    `Create a raw engram (note) at any location. For structured memory use spawn_* tools instead.
+Supported types: text, code, book, canvas, mermaid, relationMap, render, search, file, image.
+For code notes specify mime e.g. "application/javascript", "text/x-python".
+Returns the new noteId and branchId.`,
     {
       parentNoteId: z.string().describe("Parent note ID"),
-      title: z.string().describe("Note title"),
-      content: z.string().describe("Note body (HTML for text, plain for code)"),
-      type: z.enum(["text","code","book","canvas","mermaid","relationMap","render","search","file","image"]).optional().describe("Note type (default: text)"),
-      mime: z.string().optional().describe("MIME type (required for code/file/image)"),
+      title: z.string().describe("Engram title"),
+      content: z.string().describe("Body (HTML for text, plain for code)"),
+      type: z.enum(["text","code","book","canvas","mermaid","relationMap","render","search","file","image"]).optional(),
+      mime: z.string().optional().describe("MIME type (required for code / file / image)"),
     },
     async ({ parentNoteId, title, content, type, mime }) => {
       const result = await trilium.createNote(parentNoteId, title, content, type ?? "text", mime);
@@ -229,9 +329,10 @@ Returns the new noteId and branchId only.`,
   );
 
   server.tool(
-    "update_note_content",
-    `Replace the full content of an existing note. For text notes use HTML; for code notes use plain text.
-Trilium auto-saves a revision before update when the note has changed — so history is preserved.`,
+    "rewrite_engram",
+    `Replace the full content of an existing engram.
+For text notes use HTML; for code notes use plain text.
+Trilium auto-saves a revision before overwrite when content changed.`,
     {
       noteId: z.string().describe("Note ID"),
       content: z.string().describe("New full content"),
@@ -243,9 +344,9 @@ Trilium auto-saves a revision before update when the note has changed — so his
   );
 
   server.tool(
-    "patch_note",
-    `Update note metadata: title, type, or mime. Does not touch content.
-Use to rename notes, reclassify their type, or fix MIME after creation.`,
+    "retitle_engram",
+    `Update engram metadata: title, type, or mime. Does not touch content.
+Use to rename, reclassify type, or fix MIME after creation.`,
     {
       noteId: z.string().describe("Note ID"),
       title: z.string().optional().describe("New title"),
@@ -258,30 +359,32 @@ Use to rename notes, reclassify their type, or fix MIME after creation.`,
       if (type  != null) fields.type  = type;
       if (mime  != null) fields.mime  = mime;
       const note = await trilium.patchNote(noteId, fields);
-      return txt({ noteId: note.noteId, title: note.title, type: note.type, mime: note.mime });
+      return txt({ noteId: note.noteId, title: note.title, type: note.type });
     }
   );
 
   server.tool(
-    "delete_note",
-    `Delete a note and all its branches. If it is the last branch the note is erased; otherwise only the branch is removed.
-Prefer archiving (add #archived label) over deletion for knowledge preservation.`,
-    { noteId: z.string().describe("Note ID to delete") },
+    "dissolve_engram",
+    `Delete an engram and all its branches. If it is the last branch the engram is erased permanently.
+Prefer adding #archived label over deletion to preserve knowledge history.`,
+    { noteId: z.string().describe("Note ID to dissolve") },
     async ({ noteId }) => {
       await trilium.deleteNote(noteId);
-      return txt({ ok: true, deleted: noteId });
+      return txt({ ok: true, dissolved: noteId });
     }
   );
 
-  // ── STRUCTURE / CLONING ────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // STRUCTURE / BRANCHING
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "clone_note",
-    `Place an existing note into an additional location in the tree (multi-parent branching).
-This does NOT copy the note — both locations share the same content. Useful for cross-linking
-knowledge into multiple categories without duplication.`,
+    "graft_engram",
+    `Place an existing engram into an additional location (multi-parent branching).
+Does NOT copy — both locations share the same content. Useful for cross-domain indexing
+without duplication. Use synapse for semantic linking instead when a relation is more appropriate.`,
     {
-      noteId: z.string().describe("Note to clone"),
+      noteId: z.string().describe("Engram to graft"),
       parentNoteId: z.string().describe("Target parent"),
       prefix: z.string().optional().describe("Optional branch prefix label"),
     },
@@ -292,22 +395,19 @@ knowledge into multiple categories without duplication.`,
   );
 
   server.tool(
-    "move_note",
-    `Move a note to a new parent by deleting its current branch and creating a new one.
-Use when restructuring the knowledge hierarchy.`,
+    "migrate_engram",
+    `Move an engram to a new parent. Deletes the old branch, creates a new one.
+Never leaves the engram orphaned — new branch is created before old is removed.`,
     {
-      noteId: z.string().describe("Note to move"),
+      noteId: z.string().describe("Engram to migrate"),
       fromParentNoteId: z.string().describe("Current parent note ID"),
       toParentNoteId: z.string().describe("Destination parent note ID"),
     },
     async ({ noteId, fromParentNoteId, toParentNoteId }) => {
-      // 1. Clone into new parent first (so the note is never orphaned)
       const newBranch = await trilium.cloneNote(noteId, toParentNoteId);
-      // 2. Re-fetch to get updated branch list including the new branch
-      const freshNote = await trilium.getNote(noteId);
-      // 3. Find and delete the old branch from fromParentNoteId
-      for (const bid of freshNote.parentBranchIds) {
-        if (bid === newBranch.branchId) continue; // skip the one we just created
+      const fresh = await trilium.getNote(noteId);
+      for (const bid of fresh.parentBranchIds) {
+        if (bid === newBranch.branchId) continue;
         const branch = await trilium.getBranch(bid);
         if (branch.parentNoteId === fromParentNoteId) {
           await trilium.deleteBranch(bid);
@@ -318,19 +418,21 @@ Use when restructuring the knowledge hierarchy.`,
     }
   );
 
-  // ── ATTRIBUTES ────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // SYNAPTIC ATTRIBUTES (labels & relations)
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "add_label",
-    `Add a #label (key-value tag) to a note. Labels are the primary metadata and search mechanism.
-Common patterns for LLM memory:
-  #topic=AI, #status=active, #type=decision, #confidence=high
-  #reviewed=2026-03-31, #source=claude-session
-Set isInheritable=true to propagate the label to all child notes.`,
+    "imprint_label",
+    `Add a #label (key-value tag) to an engram. Labels are the primary metadata and search mechanism.
+Common patterns:
+  #noteType=concept | #status=active | #topic=AI | #domain=Technology
+  #confidence=high | #reviewed=2026-03-31 | #source=session
+Set isInheritable=true to propagate the label down to all child engrams.`,
     {
       noteId: z.string().describe("Target note ID"),
       name: z.string().describe("Label name (no # prefix)"),
-      value: z.string().optional().describe("Label value (default: empty = flag label)"),
+      value: z.string().optional().describe("Label value (empty = boolean flag)"),
       isInheritable: z.boolean().optional().describe("Propagate to children (default: false)"),
     },
     async ({ noteId, name, value, isInheritable }) => {
@@ -340,53 +442,711 @@ Set isInheritable=true to propagate the label to all child notes.`,
   );
 
   server.tool(
-    "add_relation",
-    `Link two notes via a ~relation. Relations are directional typed edges in the knowledge graph.
-Common patterns:
-  ~relatedTo, ~supports, ~contradicts, ~dependsOn, ~implements, ~followsUp
-  ~template (link note to a template), ~internalLink (soft link)
-Relations are traversable — use get_linked_notes to follow them.`,
+    "synapse",
+    `Create a typed directional synapse (relation) between two engrams.
+Synapses are the axons of the knowledge graph — use them to wire the connectome.
+
+Canonical synapse types:
+  relatesTo | extends | contradicts | supports | causes | references
+  partOf | worksWith | mentors | instanceOf | supersedes | implements | inspiredBy | sourceOf
+
+Custom types are allowed but prefer the canonical vocabulary for traversal consistency.
+Returns the created attribute stub.`,
     {
-      fromNoteId: z.string().describe("Source note ID"),
-      name: z.string().describe("Relation name (no ~ prefix)"),
-      toNoteId: z.string().describe("Target note ID"),
-      isInheritable: z.boolean().optional().describe("Propagate to children (default: false)"),
+      fromNoteId: z.string().describe("Source engram ID"),
+      synapseType: z.string().describe("Relation name (e.g. relatesTo, extends, contradicts)"),
+      toNoteId: z.string().describe("Target engram ID"),
+      bidirectional: z.boolean().optional().describe("Also create reverse relation (default: false)"),
     },
-    async ({ fromNoteId, name, toNoteId, isInheritable }) => {
-      const attr = await trilium.addRelation(fromNoteId, name, toNoteId, isInheritable ?? false);
-      return txt(attrStub(attr));
+    async ({ fromNoteId, synapseType, toNoteId, bidirectional }) => {
+      const fwd = await trilium.addRelation(fromNoteId, synapseType, toNoteId);
+      const result: Record<string, unknown> = { forward: attrStub(fwd) };
+
+      if (bidirectional) {
+        const rev = await trilium.addRelation(toNoteId, synapseType, fromNoteId);
+        result.reverse = attrStub(rev);
+      }
+
+      return txt(result);
     }
   );
 
   server.tool(
-    "delete_attribute",
-    `Remove a label or relation by its attributeId.
-Get the attributeId from get_note's attributes array. Use to clean up stale metadata.`,
-    { attributeId: z.string().describe("Attribute ID to delete") },
+    "desynapse",
+    `Remove a specific named synapse between two engrams.
+Requires the relation name and both note IDs — more ergonomic than erase_attribute.
+Use erase_attribute if you only have the attributeId.`,
+    {
+      fromNoteId: z.string().describe("Source engram ID"),
+      synapseType: z.string().describe("Relation name to remove"),
+      toNoteId: z.string().describe("Target engram ID"),
+    },
+    async ({ fromNoteId, synapseType, toNoteId }) => {
+      await trilium.desynapse(fromNoteId, synapseType, toNoteId);
+      return txt({ ok: true, removed: `${fromNoteId} ~${synapseType}→ ${toNoteId}` });
+    }
+  );
+
+  server.tool(
+    "erase_attribute",
+    `Delete any label or relation attribute by its raw attributeId.
+Get the attributeId from retrieve_engram's attributes array.
+For removing a named relation, desynapse is more ergonomic.`,
+    { attributeId: z.string().describe("Attribute ID to erase") },
     async ({ attributeId }) => {
       await trilium.deleteAttribute(attributeId);
-      return txt({ ok: true, deleted: attributeId });
+      return txt({ ok: true, erased: attributeId });
     }
   );
 
   server.tool(
-    "get_linked_notes",
-    `Return all notes that a given note points to via ~relations.
-Use to traverse the knowledge graph: find what a decision depends on, what a concept relates to, etc.
-Returns id+title pairs only.`,
-    { noteId: z.string().describe("Source note ID") },
+    "strengthen_synapse",
+    `Increment the synaptic weight between two engrams (Hebbian reinforcement).
+Each call adds 1 to a #sw_{type}_{targetId} label on the source engram.
+Weight reflects how often a pathway has been traversed / activated.
+Returns the updated strength value and label ID.`,
+    {
+      fromNoteId: z.string().describe("Source engram ID"),
+      synapseType: z.string().describe("Relation name to strengthen"),
+      toNoteId: z.string().describe("Target engram ID"),
+    },
+    async ({ fromNoteId, synapseType, toNoteId }) => {
+      const result = await trilium.strengthenSynapse(fromNoteId, synapseType, toNoteId);
+      return txt({ fromNoteId, synapseType, toNoteId, ...result });
+    }
+  );
+
+  server.tool(
+    "list_synapse_types",
+    `Discover all distinct relation type names currently in use across the brain (or a subtree).
+Useful for understanding the vocabulary of the connectome before traversal.
+Returns a sorted list of type names.`,
+    {
+      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: entire brain)"),
+    },
+    async ({ ancestorNoteId }) => {
+      const types = await trilium.listSynapseTypes(ancestorNoteId ?? Brain.root);
+      return txt({ synapseTypes: types, canonical: SynapseTypes });
+    }
+  );
+
+  server.tool(
+    "query_synapses",
+    `Find all engrams connected to a given note via a specific synapse type.
+direction=outbound (default): notes this engram points TO via synapseType
+direction=inbound: notes that point TO this engram via synapseType`,
+    {
+      noteId: z.string().describe("Source engram ID"),
+      synapseType: z.string().describe("Relation name to follow"),
+      direction: z.enum(["outbound", "inbound"]).optional().describe("Traversal direction (default: outbound)"),
+    },
+    async ({ noteId, synapseType, direction }) => {
+      const notes = await trilium.queryBySynapse(noteId, synapseType, direction ?? "outbound");
+      return txt(notes);
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // GRAPH / CONNECTOME TRAVERSAL
+  // ════════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "trace_efferents",
+    `Return all engrams this note signals TO via any outgoing synapse (relation).
+One hop only — use expand_neighborhood for multi-hop traversal.
+Returns id+title pairs with the relation name.`,
+    { noteId: z.string().describe("Source engram ID") },
     async ({ noteId }) => {
-      const notes = await trilium.getLinkedNotes(noteId);
-      return txt(notes.map(noteStub));
+      const note = await trilium.getNote(noteId);
+      const rels = note.attributes.filter((a) => a.type === "relation" && !a.name.startsWith("sw_"));
+      const linked = await Promise.all(
+        rels.map(async (r) => {
+          try {
+            const n = await trilium.getNote(r.value);
+            return { id: n.noteId, title: n.title, via: r.name };
+          } catch {
+            return null;
+          }
+        })
+      );
+      return txt(linked.filter(Boolean));
     }
   );
 
-  // ── ATTACHMENTS ───────────────────────────────────────────────────────────
+  server.tool(
+    "trace_afferents",
+    `Return all engrams that signal INTO this note — reverse synapse traversal (backlinks).
+Shows what is linked TO this engram, which trace_efferents cannot reveal.
+Returns id+title+relationName triples.`,
+    { noteId: z.string().describe("Target engram ID") },
+    async ({ noteId }) => {
+      const backlinks = await trilium.getBacklinks(noteId);
+      return txt(backlinks);
+    }
+  );
 
   server.tool(
-    "get_note_attachments",
-    `List all attachments on a note (files, images, embedded binaries).
-Returns id+title+mime+size. Call get_attachment_content to read one.`,
+    "find_neural_path",
+    `Find the shortest relation path connecting two engrams in the connectome.
+Uses BFS — returns the chain of notes and the relation names that link them.
+Returns null if no path exists within maxDepth hops.
+
+Useful for: "how is concept A connected to concept B?"`,
+    {
+      fromNoteId: z.string().describe("Starting engram ID"),
+      toNoteId: z.string().describe("Target engram ID"),
+      maxDepth: z.number().optional().describe("Maximum hops to search (default: 6)"),
+    },
+    async ({ fromNoteId, toNoteId, maxDepth }) => {
+      const path = await trilium.findNeuralPath(fromNoteId, toNoteId, maxDepth ?? 6);
+      if (!path) return txt({ found: false, message: "No path found within maxDepth" });
+      return txt({ found: true, hops: path.length - 1, path });
+    }
+  );
+
+  server.tool(
+    "expand_neighborhood",
+    `Return all engrams reachable from a starting note within N relation hops.
+Builds a local subgraph — useful for understanding the context around an engram.
+Optionally filter by a specific synapse type.
+Returns nodes with depth and the relation that led to them.`,
+    {
+      noteId: z.string().describe("Starting engram ID"),
+      depth: z.number().optional().describe("Number of hops (default: 2, max recommended: 3)"),
+      relationType: z.string().optional().describe("Filter to a specific synapse type"),
+    },
+    async ({ noteId, depth, relationType }) => {
+      const nodes = await trilium.getNeighborhood(noteId, depth ?? 2, relationType);
+      return txt({ center: noteId, nodeCount: nodes.length, nodes });
+    }
+  );
+
+  server.tool(
+    "traverse_connectome",
+    `Walk the knowledge graph from a starting engram with full controls.
+direction: outbound (follow relations), inbound (follow backlinks), both
+relationType: restrict traversal to one synapse type (e.g. "extends")
+maxDepth: how many hops deep (default: 3)
+maxNodes: circuit-breaker for large graphs (default: 50)
+
+Use for: domain mapping, impact analysis, lineage tracing.`,
+    {
+      noteId: z.string().describe("Starting engram ID"),
+      direction: z.enum(["outbound", "inbound", "both"]).optional().describe("Traversal direction (default: outbound)"),
+      relationType: z.string().optional().describe("Filter to one synapse type"),
+      maxDepth: z.number().optional().describe("Max hops (default: 3)"),
+      maxNodes: z.number().optional().describe("Max nodes to visit (default: 50)"),
+    },
+    async ({ noteId, direction, relationType, maxDepth, maxNodes }) => {
+      const nodes = await trilium.traverseConnectome(noteId, {
+        direction: direction ?? "outbound",
+        relationType,
+        maxDepth: maxDepth ?? 3,
+        maxNodes: maxNodes ?? 50,
+      });
+      return txt({ start: noteId, nodeCount: nodes.length, nodes });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // STRUCTURED SPAWN (typed engram creation)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "spawn_thread",
+    `Create a properly formatted reasoning thread in Working Memory → Threads.
+Threads are active, ephemeral chains of thought. They should eventually be resolved
+and either archived or consolidated into Knowledge.
+
+Automatically adds: #noteType=thread  #status=active  #dateOpened`,
+    {
+      title: z.string().describe("Thread title"),
+      context: z.string().optional().describe("Why this thread exists (opening context)"),
+      topic: z.string().optional().describe("Topic label value"),
+      date: z.string().optional().describe("ISO date (default: today)"),
+    },
+    async ({ title, context, topic, date }) => {
+      const d = date ?? today();
+      const parentId = Brain.workingMemory.threads || Brain.workingMemory.root;
+      const result = await trilium.createNote(parentId, title, threadContent(context ?? "", d));
+      const nid = result.note.noteId;
+      await Promise.all([
+        trilium.addLabel(nid, "noteType", "thread"),
+        trilium.addLabel(nid, "status", "active"),
+        trilium.addLabel(nid, "dateOpened", d),
+        ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+      ]);
+      return txt({ noteId: nid, title, status: "active", parentId });
+    }
+  );
+
+  server.tool(
+    "spawn_decision",
+    `Create a structured Decision Record in Working Memory → Decisions.
+Use the ADR (Architectural Decision Record) format: context → options → decision → rationale → consequences.
+Decisions should be promoted to Log → Decisions Made once resolved.
+
+Automatically adds: #noteType=decision  #status=pending  #dateOpened`,
+    {
+      title: z.string().describe("Decision title (start with 'Decide:' or 'Choose:')"),
+      context: z.string().optional().describe("Situation requiring a decision"),
+      topic: z.string().optional().describe("Topic label value"),
+      date: z.string().optional().describe("ISO date (default: today)"),
+    },
+    async ({ title, context, topic, date }) => {
+      const d = date ?? today();
+      const parentId = Brain.workingMemory.decisions || Brain.workingMemory.root;
+      const result = await trilium.createNote(parentId, title, decisionContent(context ?? ""));
+      const nid = result.note.noteId;
+      await Promise.all([
+        trilium.addLabel(nid, "noteType", "decision"),
+        trilium.addLabel(nid, "status", "pending"),
+        trilium.addLabel(nid, "dateOpened", d),
+        ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+      ]);
+      return txt({ noteId: nid, title, status: "pending", parentId });
+    }
+  );
+
+  server.tool(
+    "spawn_concept",
+    `Create an atomic concept engram in Knowledge → [domain] → Concepts.
+Concepts are evergreen, atomic definitions. One concept per note.
+If the domain subtree does not exist, call spawn_domain first.
+
+Automatically adds: #noteType=concept  #domain={domain}`,
+    {
+      title: z.string().describe("Concept name"),
+      domain: z.string().describe("Knowledge domain (e.g. Technology, Philosophy, Business)"),
+      domainNoteId: z.string().optional().describe("Parent domain note ID (overrides domain name lookup)"),
+      topic: z.string().optional().describe("Topic label for finer grouping"),
+    },
+    async ({ title, domain, domainNoteId, topic }) => {
+      // Locate or fall back to knowledge root
+      let parentId = domainNoteId;
+      if (!parentId) {
+        // Try to find an existing domain note by label
+        try {
+          const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
+            ancestorNoteId: Brain.knowledge.root,
+            fastSearch: true,
+            limit: 1,
+          });
+          parentId = res.results[0]?.noteId;
+        } catch {
+          // Fall back to knowledge root
+        }
+      }
+      parentId = parentId ?? Brain.knowledge.root;
+
+      const result = await trilium.createNote(parentId, title, conceptContent(domain));
+      const nid = result.note.noteId;
+      await Promise.all([
+        trilium.addLabel(nid, "noteType", "concept"),
+        trilium.addLabel(nid, "domain", domain),
+        ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+      ]);
+      return txt({ noteId: nid, title, domain, parentId });
+    }
+  );
+
+  server.tool(
+    "spawn_domain",
+    `Create a new knowledge domain subtree under Knowledge.
+Each domain gets root + Concepts + References + Notes subdirectories.
+Returns all created note IDs for immediate use.`,
+    {
+      name: z.string().describe("Domain name (e.g. Technology, Philosophy, Finance)"),
+    },
+    async ({ name }) => {
+      const domainRoot = await trilium.createNote(Brain.knowledge.root, name, domainContent(name));
+      const did = domainRoot.note.noteId;
+      await trilium.addLabel(did, "noteType", "domain");
+      await trilium.addLabel(did, "domain", name);
+
+      // Create standard subdirectories
+      const [concepts, references, notes] = await Promise.all([
+        trilium.createNote(did, "Concepts", ""),
+        trilium.createNote(did, "References", ""),
+        trilium.createNote(did, "Notes", ""),
+      ]);
+
+      return txt({
+        domain: name,
+        noteId: did,
+        subtree: {
+          concepts: concepts.note.noteId,
+          references: references.note.noteId,
+          notes: notes.note.noteId,
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "spawn_opinion",
+    `Create a blog/diary-style opinion entry directly under Opinions (no subtrees).
+Opinions are prose — stream of consciousness, argument, or stance.
+Format: date · mood  →  prose body  →  tags.
+
+Automatically adds: #noteType=opinion  #mood={mood}  #dateWritten`,
+    {
+      title: z.string().describe("Entry title (can be the thesis or a short label)"),
+      mood: z.string().optional().describe("Tone: contemplative | passionate | uncertain | analytical"),
+      topics: z.array(z.string()).optional().describe("Topic tags"),
+      date: z.string().optional().describe("ISO date (default: today)"),
+    },
+    async ({ title, mood, topics, date }) => {
+      const d = date ?? today();
+      const result = await trilium.createNote(Brain.opinions, title, opinionContent(d, mood ?? "contemplative"));
+      const nid = result.note.noteId;
+      await Promise.all([
+        trilium.addLabel(nid, "noteType", "opinion"),
+        trilium.addLabel(nid, "mood", mood ?? "contemplative"),
+        trilium.addLabel(nid, "dateWritten", d),
+        ...(topics ?? []).map((t) => trilium.addLabel(nid, "topic", t)),
+      ]);
+      return txt({ noteId: nid, title, mood: mood ?? "contemplative", date: d });
+    }
+  );
+
+  server.tool(
+    "spawn_project",
+    `Create a project engram with a structured brief under Knowledge → Projects.
+Each project gets: Brief root + Decisions subdirectory + Notes subdirectory.
+
+Automatically adds: #noteType=project  #status=active  #dateStarted`,
+    {
+      title: z.string().describe("Project name"),
+      goal: z.string().optional().describe("One-line project goal"),
+      topic: z.string().optional().describe("Topic / domain label"),
+      date: z.string().optional().describe("ISO start date (default: today)"),
+    },
+    async ({ title, goal, topic, date }) => {
+      const d = date ?? today();
+      const projectsId = Brain.knowledge.projects || Brain.knowledge.root;
+      const root = await trilium.createNote(projectsId, title, projectContent(goal ?? "", d));
+      const pid = root.note.noteId;
+      await Promise.all([
+        trilium.addLabel(pid, "noteType", "project"),
+        trilium.addLabel(pid, "status", "active"),
+        trilium.addLabel(pid, "dateStarted", d),
+        ...(topic ? [trilium.addLabel(pid, "topic", topic)] : []),
+        ...(goal ? [trilium.addLabel(pid, "goal", goal)] : []),
+      ]);
+
+      const [decisions, notes] = await Promise.all([
+        trilium.createNote(pid, "Decisions", ""),
+        trilium.createNote(pid, "Notes", ""),
+      ]);
+
+      return txt({
+        noteId: pid,
+        title,
+        subtree: {
+          decisions: decisions.note.noteId,
+          notes: notes.note.noteId,
+        },
+      });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MEMORY / RECALL
+  // ════════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "recall",
+    `Search the brain's memory sections for relevant context. Returns content snippets for
+top 3 matches and id+title stubs for the rest.
+Use at session start to orient before acting, and before creating new engrams (avoid duplicates).`,
+    {
+      query: z.string().describe("What to recall"),
+      section: z.enum(["identity","workingMemory","knowledge","opinions","log","all"]).optional(),
+      limit: z.number().optional().describe("Max results (default: 10)"),
+    },
+    async ({ query, section, limit }) => {
+      const sectionMap: Record<string, string> = {
+        identity:      Brain.identity.root,
+        workingMemory: Brain.workingMemory.root,
+        knowledge:     Brain.knowledge.root,
+        opinions:      Brain.opinions,
+        log:           Brain.log.root,
+      };
+      const ancestorNoteId = (!section || section === "all") ? Brain.root : sectionMap[section];
+      const result = await trilium.searchNotes(query, { ancestorNoteId, limit: limit ?? 10 });
+
+      const tops = result.results.slice(0, 3);
+      const withContent = await Promise.all(
+        tops.map(async (n) => {
+          try {
+            const content = await trilium.getNoteContent(n.noteId);
+            return { id: n.noteId, title: n.title, snippet: content.slice(0, 800) };
+          } catch {
+            return { id: n.noteId, title: n.title, snippet: "" };
+          }
+        })
+      );
+
+      return txt({ topResults: withContent, otherMatches: result.results.slice(3).map(noteStub) });
+    }
+  );
+
+  server.tool(
+    "imprint",
+    `Persist a new engram into the appropriate memory section with standard labels.
+  • identity      → facts about the user / system
+  • workingMemory → active threads, open questions, current decisions
+  • knowledge     → durable facts, how-to, reference material
+  • opinions      → use spawn_opinion for proper diary format
+Adds #noteType, #dateStored, and optional #topic label automatically.`,
+    {
+      section: z.enum(["identity","workingMemory","knowledge","opinions"]).describe("Target section"),
+      title: z.string().describe("Short descriptive title"),
+      content: z.string().describe("Content to store (plain text or HTML)"),
+      topic: z.string().optional().describe("Topic label"),
+      subsectionId: z.string().optional().describe("Specific sub-note ID to nest under"),
+    },
+    async ({ section, title, content, topic, subsectionId }) => {
+      const parentMap: Record<string, string> = {
+        identity:      Brain.identity.root,
+        workingMemory: Brain.workingMemory.root,
+        knowledge:     Brain.knowledge.root,
+        opinions:      Brain.opinions,
+      };
+      const parentNoteId = subsectionId ?? parentMap[section];
+      const result = await trilium.createNote(parentNoteId, title, content);
+      const nid = result.note.noteId;
+      await trilium.addLabel(nid, "noteType", section);
+      await trilium.addLabel(nid, "dateStored", today());
+      if (topic) await trilium.addLabel(nid, "topic", topic);
+      return txt({ noteId: nid, title, section });
+    }
+  );
+
+  server.tool(
+    "reinforce",
+    `Update an existing memory engram. Snapshots the prior version as a revision first,
+then overwrites content. Adds #dateUpdated label.
+Use to correct, expand, or supersede stored knowledge rather than creating duplicates.`,
+    {
+      noteId: z.string().describe("ID of the engram to reinforce"),
+      content: z.string().describe("New full content"),
+      title: z.string().optional().describe("New title (optional)"),
+    },
+    async ({ noteId, content, title }) => {
+      await trilium.createRevision(noteId);
+      await trilium.updateNoteContent(noteId, content);
+      if (title) await trilium.patchNote(noteId, { title });
+      await trilium.addLabel(noteId, "dateUpdated", today());
+      return txt({ ok: true, noteId });
+    }
+  );
+
+  server.tool(
+    "weave_thread",
+    `Manage reasoning threads in Working Memory → Threads.
+  • open  — create a thread (use spawn_thread for full format)
+  • append — add a timestamped log entry to an existing thread
+  • close — mark resolved + append resolution summary
+  • list  — return all active threads`,
+    {
+      action: z.enum(["open","append","close","list"]).describe("Thread action"),
+      title: z.string().optional().describe("Thread title (for open)"),
+      noteId: z.string().optional().describe("Thread note ID (for append / close)"),
+      entry: z.string().optional().describe("Log entry text (for append)"),
+      resolution: z.string().optional().describe("Resolution summary (for close)"),
+      date: z.string().optional().describe("ISO date (default: today)"),
+    },
+    async ({ action, title, noteId, entry, resolution, date }) => {
+      const d = date ?? today();
+
+      if (action === "list") {
+        const result = await trilium.searchNotes("#noteType=thread #status=active", {
+          ancestorNoteId: Brain.workingMemory.root,
+          fastSearch: true,
+        });
+        return txt(result.results.map(noteStub));
+      }
+
+      if (action === "open") {
+        if (!title) throw new Error("title required to open a thread");
+        const result = await trilium.createNote(
+          Brain.workingMemory.threads || Brain.workingMemory.root,
+          title,
+          threadContent("", d)
+        );
+        const nid = result.note.noteId;
+        await trilium.addLabel(nid, "noteType", "thread");
+        await trilium.addLabel(nid, "status", "active");
+        await trilium.addLabel(nid, "dateOpened", d);
+        return txt({ noteId: nid, title, action: "opened" });
+      }
+
+      if (action === "append") {
+        if (!noteId) throw new Error("noteId required to append");
+        const existing = await trilium.getNoteContent(noteId);
+        const entryHtml = `<h3>${d}</h3><p>${entry ?? ""}</p>`;
+        // Insert before Resolution section if present
+        const updated = existing.includes("<h2>Resolution</h2>")
+          ? existing.replace("<h2>Resolution</h2>", `${entryHtml}<h2>Resolution</h2>`)
+          : existing + entryHtml;
+        await trilium.updateNoteContent(noteId, updated);
+        return txt({ ok: true, noteId, action: "appended", date: d });
+      }
+
+      if (action === "close") {
+        if (!noteId) throw new Error("noteId required to close a thread");
+        const existing = await trilium.getNoteContent(noteId);
+        const resHtml = `<p>${resolution ?? "Resolved."}</p>`;
+        const updated = existing.replace(
+          /<h2>Resolution<\/h2>\s*<p><em>— pending —<\/em><\/p>/,
+          `<h2>Resolution</h2>${resHtml}`
+        );
+        await trilium.updateNoteContent(noteId, updated.includes(resHtml) ? updated : existing + `<h2>Resolution</h2>${resHtml}`);
+        await trilium.addLabel(noteId, "status", "resolved");
+        await trilium.addLabel(noteId, "dateClosed", d);
+        return txt({ noteId, action: "closed", date: d });
+      }
+
+      throw new Error(`Unknown action: ${action}`);
+    }
+  );
+
+  server.tool(
+    "consolidate",
+    `Promote a Working Memory engram (thread or decision) into durable Knowledge.
+Creates a properly labelled Knowledge engram from the working memory note,
+links them via ~sourceOf relation, and optionally closes the original thread.
+
+Use when a thread has yielded reusable knowledge worth preserving.`,
+    {
+      sourceNoteId: z.string().describe("Working memory engram to consolidate"),
+      targetTitle: z.string().optional().describe("Title for the new Knowledge engram (default: same as source)"),
+      domain: z.string().optional().describe("Knowledge domain to nest under"),
+      domainNoteId: z.string().optional().describe("Explicit parent note ID (overrides domain lookup)"),
+      closeSource: z.boolean().optional().describe("Close / archive the source thread after consolidation (default: true)"),
+    },
+    async ({ sourceNoteId, targetTitle, domain, domainNoteId, closeSource }) => {
+      const [sourceMeta, sourceContent] = await Promise.all([
+        trilium.getNote(sourceNoteId),
+        trilium.getNoteContent(sourceNoteId),
+      ]);
+
+      // Determine target parent
+      let parentId = domainNoteId;
+      if (!parentId && domain) {
+        try {
+          const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
+            ancestorNoteId: Brain.knowledge.root, fastSearch: true, limit: 1,
+          });
+          parentId = res.results[0]?.noteId;
+        } catch {
+          // Fall through to knowledge root
+        }
+      }
+      parentId = parentId ?? Brain.knowledge.root;
+
+      const newTitle = targetTitle ?? sourceMeta.title;
+      const result = await trilium.createNote(parentId, newTitle, sourceContent);
+      const nid = result.note.noteId;
+
+      const topicLabel = sourceMeta.attributes.find((a) => a.name === "topic");
+      await Promise.all([
+        trilium.addLabel(nid, "noteType", "knowledge"),
+        trilium.addLabel(nid, "dateConsolidated", today()),
+        ...(domain ? [trilium.addLabel(nid, "domain", domain)] : []),
+        ...(topicLabel ? [trilium.addLabel(nid, "topic", topicLabel.value)] : []),
+        trilium.addRelation(nid, "sourceOf", sourceNoteId),
+      ]);
+
+      if (closeSource !== false) {
+        await trilium.addLabel(sourceNoteId, "status", "consolidated");
+      }
+
+      return txt({ consolidated: nid, source: sourceNoteId, parentId, title: newTitle });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MAINTENANCE
+  // ════════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "scan_orphans",
+    `Find engrams in the brain that have no outgoing relations and no meaningful labels.
+These are disconnected neurons — candidates for linking, enriching, or dissolving.
+Searches within ancestorNoteId scope (default: knowledge root).`,
+    {
+      ancestorNoteId: z.string().optional().describe("Subtree to scan (default: knowledge root)"),
+      limit: z.number().optional().describe("Max orphans to return (default: 30)"),
+    },
+    async ({ ancestorNoteId, limit }) => {
+      const scopeId = ancestorNoteId ?? Brain.knowledge.root;
+      const result = await trilium.searchNotes("note", { ancestorNoteId: scopeId, limit: 200 });
+
+      const orphans: Array<{ id: string; title: string; type?: string }> = [];
+      for (const n of result.results) {
+        try {
+          const full = await trilium.getNote(n.noteId);
+          const hasRelations = full.attributes.some((a) => a.type === "relation");
+          const hasMeaningfulLabels = full.attributes.some(
+            (a) => a.type === "label" && !["noteType","dateStored","dateUpdated","dateConsolidated"].includes(a.name)
+          );
+          if (!hasRelations && !hasMeaningfulLabels) {
+            orphans.push(noteStub(full));
+          }
+          if (orphans.length >= (limit ?? 30)) break;
+        } catch {
+          // Skip
+        }
+      }
+
+      return txt({ orphanCount: orphans.length, orphans });
+    }
+  );
+
+  server.tool(
+    "suggest_synapses",
+    `Find candidate engrams to connect to a given note based on shared labels.
+Returns notes that share topic / domain / other labels but have no existing relation.
+Ranked by number of shared labels (most similar first).`,
+    {
+      noteId: z.string().describe("Source engram to find connection candidates for"),
+      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: knowledge root)"),
+      limit: z.number().optional().describe("Max suggestions (default: 10)"),
+    },
+    async ({ noteId, ancestorNoteId, limit }) => {
+      const scopeId = ancestorNoteId ?? Brain.knowledge.root;
+      const suggestions = await trilium.suggestSynapses(noteId, scopeId, limit ?? 10);
+      return txt({ suggestions });
+    }
+  );
+
+  server.tool(
+    "bulk_imprint",
+    `Apply a label to multiple engrams in one call.
+Useful for batch-tagging search results, marking a set of notes as reviewed, etc.
+Returns counts of successes and failures.`,
+    {
+      noteIds: z.array(z.string()).describe("Array of note IDs to label"),
+      labelName: z.string().describe("Label name"),
+      labelValue: z.string().optional().describe("Label value (default: empty flag)"),
+      isInheritable: z.boolean().optional().describe("Propagate to children (default: false)"),
+    },
+    async ({ noteIds, labelName, labelValue, isInheritable }) => {
+      const result = await trilium.bulkAddLabel(noteIds, labelName, labelValue ?? "", isInheritable ?? false);
+      return txt(result);
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ARTIFACTS (ATTACHMENTS)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "list_artifacts",
+    "List all artifacts (attachments) on an engram. Returns id+title+mime+size stubs.",
     { noteId: z.string().describe("Note ID") },
     async ({ noteId }) => {
       const attachments = await trilium.getNoteAttachments(noteId);
@@ -395,23 +1155,22 @@ Returns id+title+mime+size. Call get_attachment_content to read one.`,
   );
 
   server.tool(
-    "get_attachment_content",
-    "Return the raw text content of an attachment (for text/code attachments).",
+    "read_artifact",
+    "Return the raw text content of an artifact (for text / code attachments).",
     { attachmentId: z.string().describe("Attachment ID") },
     async ({ attachmentId }) => {
-      const content = await trilium.getAttachmentContent(attachmentId);
-      return txt(content);
+      return txt(await trilium.getAttachmentContent(attachmentId));
     }
   );
 
   server.tool(
-    "create_attachment",
-    `Attach a file or text blob to a note. Useful for storing structured data, exports, or
-supplementary files alongside a note without polluting its content.
-role: "file" for generic files, "image" for images.`,
+    "attach_artifact",
+    `Attach a file or text blob to an engram.
+role: "file" for generic files, "image" for images.
+Useful for storing structured exports, diagrams, or supplementary data alongside a note.`,
     {
       ownerId: z.string().describe("Parent note ID"),
-      title: z.string().describe("Attachment filename/title"),
+      title: z.string().describe("Artifact filename / title"),
       mime: z.string().describe("MIME type e.g. application/json, text/plain, image/png"),
       content: z.string().describe("Text content (base64 for binary)"),
       role: z.enum(["file","image"]).optional().describe("Attachment role (default: file)"),
@@ -422,13 +1181,13 @@ role: "file" for generic files, "image" for images.`,
     }
   );
 
-  // ── REVISIONS ─────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // SNAPSHOTS (REVISIONS)
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "get_note_revisions",
-    `List all saved revisions for a note, newest first.
-Revisions are immutable snapshots — useful for auditing what the LLM changed.
-Returns id+title+date+size. Call get_revision_content to read a specific version.`,
+    "list_snapshots",
+    "List all saved revisions for an engram, newest first. Returns id+title+date+size stubs.",
     { noteId: z.string().describe("Note ID") },
     async ({ noteId }) => {
       const revisions = await trilium.getNoteRevisions(noteId);
@@ -437,19 +1196,18 @@ Returns id+title+date+size. Call get_revision_content to read a specific version
   );
 
   server.tool(
-    "get_revision_content",
-    "Return the content of a specific note revision (historical snapshot).",
-    { revisionId: z.string().describe("Revision ID from get_note_revisions") },
+    "read_snapshot",
+    "Return the content of a specific engram revision (historical snapshot).",
+    { revisionId: z.string().describe("Revision ID from list_snapshots") },
     async ({ revisionId }) => {
-      const content = await trilium.getRevisionContent(revisionId);
-      return txt(content);
+      return txt(await trilium.getRevisionContent(revisionId));
     }
   );
 
   server.tool(
-    "create_revision",
-    `Manually snapshot a note's current content as a named revision.
-Call before making significant automated edits so the prior version is always recoverable.`,
+    "snapshot_engram",
+    `Manually save a snapshot of an engram's current content as a revision.
+Always call before making significant automated edits so the prior state is recoverable.`,
     { noteId: z.string().describe("Note ID to snapshot") },
     async ({ noteId }) => {
       await trilium.createRevision(noteId);
@@ -457,243 +1215,96 @@ Call before making significant automated edits so the prior version is always re
     }
   );
 
-  // ── CALENDAR / JOURNAL ────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // TEMPORAL / CALENDAR PULSES
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "get_day_note",
-    `Get (or auto-create) today's journal day note. Returns its noteId so you can append
-thoughts, decisions, or summaries to the daily record. Defaults to today.`,
+    "get_day_pulse",
+    "Get (or auto-create) today's journal day note. Returns noteId for appending daily records.",
     { date: z.string().optional().describe("YYYY-MM-DD (default: today)") },
-    async ({ date }) => {
-      const d = date ?? new Date().toISOString().slice(0, 10);
-      return txt(await trilium.getDayNote(d));
-    }
+    async ({ date }) => txt(await trilium.getDayNote(date ?? today()))
   );
 
   server.tool(
-    "get_week_note",
-    "Get (or auto-create) the journal week note for a given week. Format: YYYY-Www e.g. 2026-W13.",
+    "get_week_pulse",
+    "Get (or auto-create) the journal week note. Format: YYYY-Www e.g. 2026-W13.",
     { week: z.string().describe("Week in YYYY-Www format") },
     async ({ week }) => txt(await trilium.getWeekNote(week))
   );
 
   server.tool(
-    "get_month_note",
+    "get_month_pulse",
     "Get (or auto-create) the journal month note. Format: YYYY-MM e.g. 2026-03.",
     { month: z.string().describe("Month in YYYY-MM format") },
     async ({ month }) => txt(await trilium.getMonthNote(month))
   );
 
   server.tool(
-    "get_year_note",
+    "get_year_pulse",
     "Get (or auto-create) the journal year note. Format: YYYY e.g. 2026.",
     { year: z.string().describe("Year in YYYY format") },
     async ({ year }) => txt(await trilium.getYearNote(year))
   );
 
   server.tool(
-    "get_inbox_note",
-    `Get the inbox note for a date — the canonical drop zone for unprocessed ideas.
-If a #inbox-labelled note exists it is returned; otherwise the day note is used.`,
+    "get_inbox_pulse",
+    `Get the inbox note for a date — the canonical drop zone for unprocessed captures.
+Use triage_inbox to process items from here into proper brain sections.`,
     { date: z.string().optional().describe("YYYY-MM-DD (default: today)") },
-    async ({ date }) => {
-      const d = date ?? new Date().toISOString().slice(0, 10);
-      return txt(await trilium.getInboxNote(d));
-    }
+    async ({ date }) => txt(await trilium.getInboxNote(date ?? today()))
   );
 
-  // ── MEMORY / KNOWLEDGE SECTION SHORTCUTS ──────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // SYSTEM
+  // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "memory_recall",
-    `Search within the LLM's own memory sections (Identity, Working Memory, Knowledge, Opinions).
-More focused than search_notes — scoped to the Trilium root subtree and returns content snippets.
-Use at session start to recall relevant context before answering.`,
-    {
-      query: z.string().describe("What to recall"),
-      section: z.enum(["identity","workingMemory","knowledge","opinions","all"]).optional().describe("Which section to search (default: all)"),
-      limit: z.number().optional().describe("Max results (default: 10)"),
-    },
-    async ({ query, section, limit }) => {
-      const ancestorMap: Record<string, string> = {
-        identity: Trilium.identity,
-        workingMemory: Trilium.workingMemory.root,
-        knowledge: Trilium.knowledge,
-        opinions: Trilium.opinions,
-      };
-      const ancestorNoteId = (!section || section === "all") ? Trilium.root : ancestorMap[section];
-      const result = await trilium.searchNotes(query, { ancestorNoteId, limit: limit ?? 10 });
-      // For recall, include content of top results (up to 3, truncated to 800 chars each)
-      const tops = result.results.slice(0, 3);
-      const withContent = await Promise.all(
-        tops.map(async (n) => {
-          try {
-            const content = await trilium.getNoteContent(n.noteId);
-            return { id: n.noteId, title: n.title, content: content.slice(0, 800) };
-          } catch {
-            return { id: n.noteId, title: n.title, content: "" };
-          }
-        })
-      );
-      const rest = result.results.slice(3).map(noteStub);
-      return txt({ topResults: withContent, otherMatches: rest });
-    }
-  );
-
-  server.tool(
-    "memory_store",
-    `Persist a piece of information into the appropriate memory section.
-  • identity → facts about the user/system/personality
-  • workingMemory → active threads, open questions, current decisions
-  • knowledge → durable facts, how-to, reference material
-  • opinions → preferences, evaluations, stances
-Automatically adds #llmMemory label + a #topic label if provided.
-Returns the new noteId.`,
-    {
-      section: z.enum(["identity","workingMemory","knowledge","opinions"]).describe("Which section to store in"),
-      title: z.string().describe("Short descriptive title"),
-      content: z.string().describe("The information to store (plain text or HTML)"),
-      topic: z.string().optional().describe("Topic label value e.g. 'AI', 'project-x'"),
-      subsection: z.string().optional().describe("Optional sub-note ID within the section to nest under"),
-    },
-    async ({ section, title, content, topic, subsection }) => {
-      const parentMap: Record<string, string> = {
-        identity: Trilium.identity,
-        workingMemory: Trilium.workingMemory.root,
-        knowledge: Trilium.knowledge,
-        opinions: Trilium.opinions,
-      };
-      const parentNoteId = subsection ?? parentMap[section];
-      const result = await trilium.createNote(parentNoteId, title, content);
-      const noteId = result.note.noteId;
-      // Tag with standard labels
-      await trilium.addLabel(noteId, "llmMemory", section);
-      if (topic) await trilium.addLabel(noteId, "topic", topic);
-      await trilium.addLabel(noteId, "dateStored", new Date().toISOString().slice(0, 10));
-      return txt({ noteId, title, section });
-    }
-  );
-
-  server.tool(
-    "memory_update",
-    `Update an existing memory note's content. Automatically snapshots the previous version as a revision first.
-Use to correct, expand, or supersede stored knowledge rather than creating duplicates.`,
-    {
-      noteId: z.string().describe("ID of the memory note to update"),
-      content: z.string().describe("New full content"),
-      title: z.string().optional().describe("New title (optional)"),
-    },
-    async ({ noteId, content, title }) => {
-      await trilium.createRevision(noteId); // snapshot before overwriting
-      await trilium.updateNoteContent(noteId, content);
-      if (title) await trilium.patchNote(noteId, { title });
-      await trilium.addLabel(noteId, "dateUpdated", new Date().toISOString().slice(0, 10));
-      return txt({ ok: true, noteId });
-    }
-  );
-
-  server.tool(
-    "working_memory_thread",
-    `Manage active threads in Working Memory. An "active thread" is an ongoing task or topic
-the LLM is tracking across sessions. Action:
-  • open  — create a new thread note under Active Threads
-  • close — add #status=closed label + move to Decisions if resolved
-  • list  — return all open threads`,
-    {
-      action: z.enum(["open","close","list"]).describe("What to do"),
-      title: z.string().optional().describe("Thread title (for open)"),
-      content: z.string().optional().describe("Thread description (for open)"),
-      noteId: z.string().optional().describe("Thread noteId (for close)"),
-      resolution: z.string().optional().describe("Resolution summary (for close)"),
-    },
-    async ({ action, title, content, noteId, resolution }) => {
-      if (action === "list") {
-        const result = await trilium.searchNotes("#llmThread #status!=closed", {
-          ancestorNoteId: Trilium.workingMemory.activeThreads,
-          fastSearch: true,
-        });
-        return txt(result.results.map(noteStub));
-      }
-
-      if (action === "open") {
-        if (!title) throw new Error("title is required to open a thread");
-        const result = await trilium.createNote(Trilium.workingMemory.activeThreads, title, content ?? "");
-        const nid = result.note.noteId;
-        await trilium.addLabel(nid, "llmThread", "");
-        await trilium.addLabel(nid, "status", "open");
-        await trilium.addLabel(nid, "dateOpened", new Date().toISOString().slice(0, 10));
-        return txt({ noteId: nid, title, action: "opened" });
-      }
-
-      if (action === "close") {
-        if (!noteId) throw new Error("noteId is required to close a thread");
-        if (resolution) {
-          const existing = await trilium.getNoteContent(noteId);
-          await trilium.updateNoteContent(noteId, existing + `\n\n## Resolution\n${resolution}`);
-        }
-        await trilium.addLabel(noteId, "status", "closed");
-        await trilium.addLabel(noteId, "dateClosed", new Date().toISOString().slice(0, 10));
-        return txt({ noteId, action: "closed" });
-      }
-
-      throw new Error(`Unknown action: ${action}`);
-    }
-  );
-
-  // ── SYSTEM / BACKUP ────────────────────────────────────────────────────────
-
-  server.tool(
-    "get_app_info",
-    "Return Trilium version, DB version, and server metadata. Useful for diagnostics.",
+    "synaptic_status",
+    "Return Trilium Brain server version, DB version, and runtime metadata. Use for diagnostics.",
     {},
-    async () => {
-      const info = await trilium.getAppInfo();
-      return txt(info);
-    }
+    async () => txt(await trilium.getAppInfo())
   );
 
   server.tool(
-    "create_backup",
-    `Trigger a named database backup. The backup file will be named brain-{date}.db.
-Call at the end of sessions that made significant changes to the knowledge base.`,
+    "backup_cortex",
+    `Trigger a named database backup. Backup file is named brain-{date}.db.
+Call at the end of sessions that made significant structural changes.`,
     { date: z.string().optional().describe("ISO date YYYY-MM-DD (default: today)") },
     async ({ date }) => {
-      const d = date ?? new Date().toISOString().slice(0, 10);
+      const d = date ?? today();
       await trilium.createBackup(d);
       return txt({ ok: true, backup: `brain-${d}.db` });
     }
   );
 
-  // ── INITIALISATION ────────────────────────────────────────────────────────
-
   server.tool(
-    "initialize_trilium",
-    `Bootstrap the full Trilium note structure from scratch. Safe to call on any environment:
-  • If the structure already exists (constants.ts IDs are valid) it reports the live IDs and skips creation.
-  • If this is a fresh Trilium instance it creates the full hierarchy and returns all new noteIds.
+    "bootstrap_brain",
+    `Initialize the full Trilium Brain note hierarchy from scratch.
+Safe to call on existing instances — checks if root exists before creating anything.
 
-After running on a fresh instance:
-  1. Copy the returned noteIds into constants.ts
+If already initialized: reports live structure and current constants.
+If fresh instance: creates the full tree, returns all noteIds, and prints the constants.ts snippet.
+
+After fresh initialization:
+  1. Copy the returned noteIds into src/constants.ts
   2. Run: bun run build
   3. Restart the MCP server
 
 Structure created:
-  root → Trilium (#iconClass=bx bx-brain)
-    ├── Identity
-    ├── Working Memory
-    │   ├── Active Threads
-    │   ├── Decisions
-    │   └── Open Questions
-    ├── Knowledge
-    ├── Opinions
-    └── Log`,
+  root → 🧠 Trilium Brain
+    ├── 👤 Identity/  (Profile · Preferences · Context)
+    ├── 🔄 Working Memory/  (Inbox · Threads · Decisions · Open Questions)
+    ├── 📚 Knowledge/  (People · Organizations · Projects)
+    ├── 💭 Opinions  (flat — blog/diary)
+    ├── 📅 Log/  (Sessions · Decisions Made)
+    └── 🗂️ Templates/  (Thread · Decision · Concept · Project · Person · Opinion)`,
     {},
     async () => {
-      // ── 1. Check if the structure already exists ──────────────────────────
-      const { Trilium: T } = await import("./constants.js");
+      const { Brain: B } = await import("./constants.js");
+      // Check if root already exists
       try {
-        const existing = await trilium.getNote(T.root);
-        // Root exists — report live state without creating anything
+        const existing = await trilium.getNote(B.root);
         const children = await Promise.all(
           existing.childNoteIds.map(async (cid) => {
             const child = await trilium.getNote(cid);
@@ -702,62 +1313,142 @@ Structure created:
         );
         return txt({
           status: "already_initialized",
-          message: "Structure already exists. No changes made.",
+          message: "Brain structure exists. No changes made.",
           root: { id: existing.noteId, title: existing.title },
           children,
-          constants: {
-            root: T.root,
-            identity: T.identity,
-            workingMemory: T.workingMemory,
-            knowledge: T.knowledge,
-            opinions: T.opinions,
-            log: T.log,
-          },
+          constants: B,
         });
       } catch {
-        // Root note not found — proceed with fresh initialization
+        // Fresh init
       }
 
-      // ── 2. Fresh initialization ───────────────────────────────────────────
       const created: Record<string, string> = {};
 
-      const root = await trilium.createNote("root", "Trilium", "");
-      created["Trilium"] = root.note.noteId;
+      // Root
+      const root = await trilium.createNote("root", "Trilium Brain", "");
+      created.root = root.note.noteId;
       await trilium.addLabel(root.note.noteId, "iconClass", "bx bx-brain");
 
-      const sections = ["Identity", "Working Memory", "Knowledge", "Opinions", "Log"] as const;
-      const sectionIds: Record<string, string> = {};
-      for (const s of sections) {
-        const r = await trilium.createNote(root.note.noteId, s, "");
-        sectionIds[s] = r.note.noteId;
-        created[s] = r.note.noteId;
-      }
+      const rootId = root.note.noteId;
 
-      const wmChildren = ["Active Threads", "Decisions", "Open Questions"] as const;
-      for (const s of wmChildren) {
-        const r = await trilium.createNote(sectionIds["Working Memory"], s, "");
-        created[s] = r.note.noteId;
-      }
+      // ── Identity ────────────────────────────────────────────────────────────
+      const identity = await trilium.createNote(rootId, "Identity", "<p><em>Who I am — persistent facts, preferences, and current context.</em></p>");
+      created.identityRoot = identity.note.noteId;
+      const [profile, preferences, context] = await Promise.all([
+        trilium.createNote(identity.note.noteId, "Profile", ""),
+        trilium.createNote(identity.note.noteId, "Preferences", ""),
+        trilium.createNote(identity.note.noteId, "Context", ""),
+      ]);
+      created.identityProfile      = profile.note.noteId;
+      created.identityPreferences  = preferences.note.noteId;
+      created.identityContext      = context.note.noteId;
 
-      // ── 3. Build the constants.ts snippet for easy copy-paste ─────────────
-      const wmId = created["Working Memory"];
-      const constantsSnippet = `export const Trilium = {
-  root: "${created["Trilium"]}",
-  identity: "${created["Identity"]}",
-  workingMemory: {
-    root: "${wmId}",
-    activeThreads: "${created["Active Threads"]}",
-    decisions: "${created["Decisions"]}",
-    openQuestions: "${created["Open Questions"]}",
+      // ── Working Memory ──────────────────────────────────────────────────────
+      const wm = await trilium.createNote(rootId, "Working Memory", "<p><em>Ephemeral — threads get resolved, decisions get promoted, inbox gets triaged.</em></p>");
+      created.workingMemoryRoot = wm.note.noteId;
+      const [inbox, threads, decisions, openQ] = await Promise.all([
+        trilium.createNote(wm.note.noteId, "Inbox", ""),
+        trilium.createNote(wm.note.noteId, "Threads", ""),
+        trilium.createNote(wm.note.noteId, "Decisions", ""),
+        trilium.createNote(wm.note.noteId, "Open Questions", ""),
+      ]);
+      created.workingMemoryInbox         = inbox.note.noteId;
+      created.workingMemoryThreads       = threads.note.noteId;
+      created.workingMemoryDecisions     = decisions.note.noteId;
+      created.workingMemoryOpenQuestions = openQ.note.noteId;
+
+      // ── Knowledge ───────────────────────────────────────────────────────────
+      const knowledge = await trilium.createNote(rootId, "Knowledge", "<p><em>Durable — atomic, evergreen engrams organized by domain.</em></p>");
+      created.knowledgeRoot = knowledge.note.noteId;
+      const [people, orgs, projects] = await Promise.all([
+        trilium.createNote(knowledge.note.noteId, "People", ""),
+        trilium.createNote(knowledge.note.noteId, "Organizations", ""),
+        trilium.createNote(knowledge.note.noteId, "Projects", ""),
+      ]);
+      created.knowledgePeople        = people.note.noteId;
+      created.knowledgeOrganizations = orgs.note.noteId;
+      created.knowledgeProjects      = projects.note.noteId;
+
+      // ── Opinions ────────────────────────────────────────────────────────────
+      const opinions = await trilium.createNote(rootId, "Opinions", "<p><em>Blog/diary entries — prose, arguments, stances. No subtrees.</em></p>");
+      created.opinions = opinions.note.noteId;
+
+      // ── Log ─────────────────────────────────────────────────────────────────
+      const log = await trilium.createNote(rootId, "Log", "<p><em>Temporal records — sessions and promoted decisions.</em></p>");
+      created.logRoot = log.note.noteId;
+      const [sessions, decisionsMade] = await Promise.all([
+        trilium.createNote(log.note.noteId, "Sessions", ""),
+        trilium.createNote(log.note.noteId, "Decisions Made", ""),
+      ]);
+      created.logSessions      = sessions.note.noteId;
+      created.logDecisionsMade = decisionsMade.note.noteId;
+
+      // ── Templates ───────────────────────────────────────────────────────────
+      const templates = await trilium.createNote(rootId, "Templates", "<p><em>Structural templates — used by spawn_* tools.</em></p>");
+      created.templatesRoot = templates.note.noteId;
+      const [tThread, tDecision, tConcept, tProject, tPerson, tOpinion] = await Promise.all([
+        trilium.createNote(templates.note.noteId, "Thread",       threadContent("", today())),
+        trilium.createNote(templates.note.noteId, "Decision",     decisionContent("")),
+        trilium.createNote(templates.note.noteId, "Concept",      conceptContent("general")),
+        trilium.createNote(templates.note.noteId, "Project Brief",projectContent("", today())),
+        trilium.createNote(templates.note.noteId, "Person",       personContent("", "")),
+        trilium.createNote(templates.note.noteId, "Opinion",      opinionContent(today(), "contemplative")),
+      ]);
+      created.templateThread      = tThread.note.noteId;
+      created.templateDecision    = tDecision.note.noteId;
+      created.templateConcept     = tConcept.note.noteId;
+      created.templateProjectBrief = tProject.note.noteId;
+      created.templatePerson      = tPerson.note.noteId;
+      created.templateOpinion     = tOpinion.note.noteId;
+
+      // ── Build constants.ts snippet ──────────────────────────────────────────
+      const constantsSnippet = `export const Brain = {
+  root: "${created.root}",
+
+  identity: {
+    root: "${created.identityRoot}",
+    profile: "${created.identityProfile}",
+    preferences: "${created.identityPreferences}",
+    context: "${created.identityContext}",
   },
-  knowledge: "${created["Knowledge"]}",
-  opinions: "${created["Opinions"]}",
-  log: "${created["Log"]}",
+
+  workingMemory: {
+    root: "${created.workingMemoryRoot}",
+    inbox: "${created.workingMemoryInbox}",
+    threads: "${created.workingMemoryThreads}",
+    decisions: "${created.workingMemoryDecisions}",
+    openQuestions: "${created.workingMemoryOpenQuestions}",
+  },
+
+  knowledge: {
+    root: "${created.knowledgeRoot}",
+    people: "${created.knowledgePeople}",
+    organizations: "${created.knowledgeOrganizations}",
+    projects: "${created.knowledgeProjects}",
+  },
+
+  opinions: "${created.opinions}",
+
+  log: {
+    root: "${created.logRoot}",
+    sessions: "${created.logSessions}",
+    decisionsMade: "${created.logDecisionsMade}",
+  },
+
+  templates: {
+    root: "${created.templatesRoot}",
+    thread: "${created.templateThread}",
+    decision: "${created.templateDecision}",
+    concept: "${created.templateConcept}",
+    projectBrief: "${created.templateProjectBrief}",
+    person: "${created.templatePerson}",
+    opinion: "${created.templateOpinion}",
+  },
 } as const;`;
 
       return txt({
         status: "initialized",
-        message: "Structure created. Copy constants below into src/constants.ts then run: bun run build",
+        message: "Brain bootstrapped. Copy constants below into src/constants.ts then run: bun run build",
         noteIds: created,
         constants_ts: constantsSnippet,
       });

@@ -15,7 +15,7 @@ const trilium = new TriliumClient(baseUrl, token);
 
 const server = new McpServer({
   name: "Trilium Brain",
-  version: "2.0.0",
+  version: "3.0.0",
 });
 
 registerTools(server, trilium);

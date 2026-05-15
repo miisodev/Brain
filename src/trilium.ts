@@ -1,6 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Trilium Brain — ETAPI client
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Attribute {
   attributeId: string;
@@ -115,9 +117,7 @@ export interface SearchOpts {
   debug?: boolean;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Client
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Client ────────────────────────────────────────────────────────────────────
 
 export class TriliumClient {
   private baseUrl: string;
@@ -160,14 +160,14 @@ export class TriliumClient {
 
   async searchNotes(query: string, opts: SearchOpts = {}): Promise<SearchResult> {
     const params = new URLSearchParams({ search: query });
-    if (opts.ancestorNoteId)      params.set("ancestorNoteId", opts.ancestorNoteId);
-    if (opts.ancestorDepth)       params.set("ancestorDepth", opts.ancestorDepth);
-    if (opts.limit != null)       params.set("limit", String(opts.limit));
-    if (opts.orderBy)             params.set("orderBy", opts.orderBy);
-    if (opts.orderDirection)      params.set("orderDirection", opts.orderDirection);
-    if (opts.fastSearch)          params.set("fastSearch", "true");
+    if (opts.ancestorNoteId)       params.set("ancestorNoteId", opts.ancestorNoteId);
+    if (opts.ancestorDepth)        params.set("ancestorDepth", opts.ancestorDepth);
+    if (opts.limit != null)        params.set("limit", String(opts.limit));
+    if (opts.orderBy)              params.set("orderBy", opts.orderBy);
+    if (opts.orderDirection)       params.set("orderDirection", opts.orderDirection);
+    if (opts.fastSearch)           params.set("fastSearch", "true");
     if (opts.includeArchivedNotes) params.set("includeArchivedNotes", "true");
-    if (opts.debug)               params.set("debug", "true");
+    if (opts.debug)                params.set("debug", "true");
     return this.request<SearchResult>(`/notes?${params}`);
   }
 
@@ -184,7 +184,7 @@ export class TriliumClient {
     noteId?: string
   ): Promise<CreateNoteResponse> {
     const body: Record<string, unknown> = { parentNoteId, title, content, type };
-    if (mime) body.mime = mime;
+    if (mime)   body.mime   = mime;
     if (noteId) body.noteId = noteId;
     return this.request<CreateNoteResponse>("/create-note", {
       method: "POST",
@@ -274,21 +274,34 @@ export class TriliumClient {
     return this.request<Attribute>(`/attributes/${attributeId}`);
   }
 
-  async addLabel(noteId: string, name: string, value: string = "", isInheritable: boolean = false): Promise<Attribute> {
+  async addLabel(
+    noteId: string,
+    name: string,
+    value: string = "",
+    isInheritable: boolean = false
+  ): Promise<Attribute> {
     return this.request<Attribute>(`/attributes`, {
       method: "POST",
       body: JSON.stringify({ noteId, type: "label", name, value, isInheritable }),
     });
   }
 
-  async addRelation(fromNoteId: string, name: string, toNoteId: string, isInheritable: boolean = false): Promise<Attribute> {
+  async addRelation(
+    fromNoteId: string,
+    name: string,
+    toNoteId: string,
+    isInheritable: boolean = false
+  ): Promise<Attribute> {
     return this.request<Attribute>(`/attributes`, {
       method: "POST",
       body: JSON.stringify({ noteId: fromNoteId, type: "relation", name, value: toNoteId, isInheritable }),
     });
   }
 
-  async updateAttribute(attributeId: string, fields: { value?: string; position?: number }): Promise<Attribute> {
+  async updateAttribute(
+    attributeId: string,
+    fields: { value?: string; position?: number }
+  ): Promise<Attribute> {
     return this.request<Attribute>(`/attributes/${attributeId}`, {
       method: "PATCH",
       body: JSON.stringify(fields),
@@ -336,7 +349,13 @@ export class TriliumClient {
     return res.text();
   }
 
-  async createAttachment(ownerId: string, title: string, mime: string, content: string, role: string = "file"): Promise<Attachment> {
+  async createAttachment(
+    ownerId: string,
+    title: string,
+    mime: string,
+    content: string,
+    role: string = "file"
+  ): Promise<Attachment> {
     return this.request<Attachment>(`/attachments`, {
       method: "POST",
       body: JSON.stringify({ ownerId, role, mime, title, content }),
@@ -387,7 +406,370 @@ export class TriliumClient {
       const body = await res.text();
       throw new Error(`Trilium backup failed (HTTP ${res.status}): ${body}`);
     }
-    // 204 No Content on success
+  }
+
+  // ── Graph traversal ────────────────────────────────────────────────────────
+
+  async getLinkedNotes(noteId: string): Promise<Note[]> {
+    const note = await this.getNote(noteId);
+    const relations = note.attributes.filter((a) => a.type === "relation");
+    const linked = await Promise.all(
+      relations.map((r) => this.getNote(r.value).catch(() => null))
+    );
+    return linked.filter((n): n is Note => n !== null);
+  }
+
+  // Find notes that have a relation pointing TO this note (reverse traversal)
+  async getBacklinks(noteId: string): Promise<Array<{ noteId: string; title: string; relationName: string }>> {
+    const backlinks: Array<{ noteId: string; title: string; relationName: string }> = [];
+
+    // Try Trilium expression search for owned relations by value
+    const queries = [
+      `note.ownedRelations.value = "${noteId}"`,
+      `note.relations.*.noteId = "${noteId}"`,
+    ];
+
+    let results: Note[] = [];
+    for (const q of queries) {
+      try {
+        const res = await this.searchNotes(q, { limit: 200, includeArchivedNotes: true });
+        if (res.results.length > 0) {
+          results = res.results;
+          break;
+        }
+      } catch {
+        // Try next query form
+      }
+    }
+
+    // Verify and extract relation names from actual attribute data
+    await Promise.all(
+      results.map(async (n) => {
+        try {
+          const full = await this.getNote(n.noteId);
+          const rels = full.attributes.filter(
+            (a) => a.type === "relation" && a.value === noteId
+          );
+          for (const rel of rels) {
+            backlinks.push({ noteId: n.noteId, title: n.title, relationName: rel.name });
+          }
+        } catch {
+          // Skip inaccessible notes
+        }
+      })
+    );
+
+    return backlinks;
+  }
+
+  // BFS to find the shortest relation path between two notes
+  async findNeuralPath(
+    fromId: string,
+    toId: string,
+    maxDepth: number = 6
+  ): Promise<Array<{ noteId: string; title: string; via?: string }> | null> {
+    const visited = new Map<string, string[]>(); // noteId → path of IDs
+    const queue: Array<{ id: string; path: string[]; vias: string[] }> = [
+      { id: fromId, path: [fromId], vias: [] },
+    ];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.id)) continue;
+      visited.set(current.id, current.path);
+
+      if (current.path.length - 1 >= maxDepth) continue;
+
+      let note: Note;
+      try {
+        note = await this.getNote(current.id);
+      } catch {
+        continue;
+      }
+
+      const relations = note.attributes.filter((a) => a.type === "relation");
+      for (const rel of relations) {
+        const nextId = rel.value;
+        if (visited.has(nextId)) continue;
+
+        if (nextId === toId) {
+          // Reconstruct path with titles
+          const fullPath = [...current.path, toId];
+          const fullVias = [...current.vias, rel.name];
+          const result: Array<{ noteId: string; title: string; via?: string }> = [];
+          for (let i = 0; i < fullPath.length; i++) {
+            try {
+              const n = await this.getNote(fullPath[i]);
+              result.push({ noteId: n.noteId, title: n.title, via: fullVias[i - 1] });
+            } catch {
+              result.push({ noteId: fullPath[i], title: "?", via: fullVias[i - 1] });
+            }
+          }
+          return result;
+        }
+
+        queue.push({
+          id: nextId,
+          path: [...current.path, nextId],
+          vias: [...current.vias, rel.name],
+        });
+      }
+    }
+
+    return null;
+  }
+
+  // BFS neighborhood: all notes reachable within `depth` relation hops
+  async getNeighborhood(
+    noteId: string,
+    depth: number = 2,
+    relationType?: string
+  ): Promise<Array<{ noteId: string; title: string; depth: number; via?: string; fromNoteId?: string }>> {
+    const visited = new Map<string, { title: string; depth: number; via?: string; fromNoteId?: string }>();
+    const queue: Array<{ id: string; dist: number; via?: string; from?: string }> = [
+      { id: noteId, dist: 0 },
+    ];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.id)) continue;
+
+      let note: Note;
+      try {
+        note = await this.getNote(current.id);
+      } catch {
+        continue;
+      }
+
+      visited.set(current.id, {
+        title: note.title,
+        depth: current.dist,
+        via: current.via,
+        fromNoteId: current.from,
+      });
+
+      if (current.dist < depth) {
+        const relations = note.attributes.filter(
+          (a) => a.type === "relation" && (!relationType || a.name === relationType)
+        );
+        for (const rel of relations) {
+          if (!visited.has(rel.value)) {
+            queue.push({ id: rel.value, dist: current.dist + 1, via: rel.name, from: current.id });
+          }
+        }
+      }
+    }
+
+    return Array.from(visited.entries()).map(([id, data]) => ({
+      noteId: id,
+      ...data,
+    }));
+  }
+
+  // Filtered graph traversal with direction and relation type controls
+  async traverseConnectome(
+    startId: string,
+    opts: {
+      maxDepth?: number;
+      relationType?: string;
+      direction?: "outbound" | "inbound" | "both";
+      maxNodes?: number;
+    } = {}
+  ): Promise<Array<{ noteId: string; title: string; depth: number; via: string; fromNoteId: string }>> {
+    const { maxDepth = 3, relationType, direction = "outbound", maxNodes = 50 } = opts;
+    const visited = new Map<string, { title: string; depth: number; via: string; fromNoteId: string }>();
+    const queue: Array<{ id: string; dist: number; via: string; from: string }> = [
+      { id: startId, dist: 0, via: "start", from: "" },
+    ];
+
+    while (queue.length > 0 && visited.size < maxNodes) {
+      const current = queue.shift()!;
+      if (visited.has(current.id) || current.dist > maxDepth) continue;
+
+      let note: Note;
+      try {
+        note = await this.getNote(current.id);
+      } catch {
+        continue;
+      }
+
+      visited.set(current.id, {
+        title: note.title,
+        depth: current.dist,
+        via: current.via,
+        fromNoteId: current.from,
+      });
+
+      if (current.dist < maxDepth) {
+        if (direction === "outbound" || direction === "both") {
+          const rels = note.attributes.filter(
+            (a) => a.type === "relation" && (!relationType || a.name === relationType)
+          );
+          for (const rel of rels) {
+            if (!visited.has(rel.value)) {
+              queue.push({ id: rel.value, dist: current.dist + 1, via: rel.name, from: current.id });
+            }
+          }
+        }
+
+        if (direction === "inbound" || direction === "both") {
+          try {
+            const backlinks = await this.getBacklinks(current.id);
+            for (const bl of backlinks) {
+              if (!relationType || bl.relationName === relationType) {
+                if (!visited.has(bl.noteId)) {
+                  queue.push({
+                    id: bl.noteId,
+                    dist: current.dist + 1,
+                    via: `←${bl.relationName}`,
+                    from: current.id,
+                  });
+                }
+              }
+            }
+          } catch {
+            // Backlink search unavailable
+          }
+        }
+      }
+    }
+
+    // Remove start node from results
+    visited.delete(startId);
+
+    return Array.from(visited.entries()).map(([id, data]) => ({
+      noteId: id,
+      ...data,
+    }));
+  }
+
+  // ── Synapse (relation) helpers ─────────────────────────────────────────────
+
+  // Remove a specific named relation from fromNote to toNote
+  async desynapse(fromNoteId: string, relationName: string, toNoteId: string): Promise<void> {
+    const note = await this.getNote(fromNoteId);
+    const rel = note.attributes.find(
+      (a) => a.type === "relation" && a.name === relationName && a.value === toNoteId
+    );
+    if (!rel) {
+      throw new Error(
+        `No '${relationName}' relation found from ${fromNoteId} to ${toNoteId}`
+      );
+    }
+    await this.deleteAttribute(rel.attributeId);
+  }
+
+  // Increment the synaptic weight for a relation (Hebbian-style strengthening)
+  async strengthenSynapse(
+    fromNoteId: string,
+    relationName: string,
+    toNoteId: string
+  ): Promise<{ strength: number; labelId: string }> {
+    const note = await this.getNote(fromNoteId);
+    const labelName = `sw_${relationName}_${toNoteId}`;
+    const existing = note.attributes.find(
+      (a) => a.type === "label" && a.name === labelName
+    );
+
+    if (existing) {
+      const newStrength = (parseInt(existing.value, 10) || 0) + 1;
+      const updated = await this.updateAttribute(existing.attributeId, {
+        value: String(newStrength),
+      });
+      return { strength: newStrength, labelId: updated.attributeId };
+    }
+
+    const created = await this.addLabel(fromNoteId, labelName, "1");
+    return { strength: 1, labelId: created.attributeId };
+  }
+
+  // Get the strength of a specific relation
+  async getSynapseStrength(fromNoteId: string, relationName: string, toNoteId: string): Promise<number> {
+    const note = await this.getNote(fromNoteId);
+    const labelName = `sw_${relationName}_${toNoteId}`;
+    const label = note.attributes.find((a) => a.type === "label" && a.name === labelName);
+    return label ? parseInt(label.value, 10) || 0 : 0;
+  }
+
+  // Discover all distinct relation type names used across a subtree
+  async listSynapseTypes(ancestorNoteId?: string): Promise<string[]> {
+    const query = ancestorNoteId
+      ? `note.isDecendantOfNote() AND note.relations != ""` // broad search
+      : `note.ownedRelations != ""`;
+
+    const types = new Set<string>();
+    try {
+      const res = await this.searchNotes(
+        ancestorNoteId ? `note` : `note`,
+        { ancestorNoteId, limit: 500, fastSearch: true }
+      );
+      for (const n of res.results) {
+        try {
+          const full = await this.getNote(n.noteId);
+          full.attributes
+            .filter((a) => a.type === "relation" && !a.name.startsWith("sw_"))
+            .forEach((a) => types.add(a.name));
+        } catch {
+          // Skip inaccessible notes
+        }
+      }
+    } catch {
+      // Return empty set on failure
+    }
+    return Array.from(types).sort();
+  }
+
+  // Find all notes that share a specific relation type to/from a given note
+  async queryBySynapse(
+    noteId: string,
+    relationName: string,
+    direction: "outbound" | "inbound" = "outbound"
+  ): Promise<Array<{ noteId: string; title: string }>> {
+    if (direction === "outbound") {
+      const note = await this.getNote(noteId);
+      const rels = note.attributes.filter(
+        (a) => a.type === "relation" && a.name === relationName
+      );
+      const notes = await Promise.all(
+        rels.map((r) =>
+          this.getNote(r.value)
+            .then((n) => ({ noteId: n.noteId, title: n.title }))
+            .catch(() => null)
+        )
+      );
+      return notes.filter((n): n is { noteId: string; title: string } => n !== null);
+    }
+
+    // Inbound: use backlinks and filter by relation name
+    const backlinks = await this.getBacklinks(noteId);
+    return backlinks
+      .filter((b) => b.relationName === relationName)
+      .map((b) => ({ noteId: b.noteId, title: b.title }));
+  }
+
+  // ── Bulk operations ────────────────────────────────────────────────────────
+
+  async bulkAddLabel(
+    noteIds: string[],
+    name: string,
+    value: string = "",
+    isInheritable: boolean = false
+  ): Promise<{ success: string[]; failed: string[] }> {
+    const success: string[] = [];
+    const failed: string[] = [];
+
+    await Promise.all(
+      noteIds.map(async (id) => {
+        try {
+          await this.addLabel(id, name, value, isInheritable);
+          success.push(id);
+        } catch {
+          failed.push(id);
+        }
+      })
+    );
+
+    return { success, failed };
   }
 
   // ── Convenience helpers ────────────────────────────────────────────────────
@@ -397,10 +779,47 @@ export class TriliumClient {
     return this.searchNotes(query);
   }
 
-  async getLinkedNotes(noteId: string): Promise<Note[]> {
+  // Find notes sharing labels with the source note (synapse suggestions)
+  async suggestSynapses(
+    noteId: string,
+    ancestorNoteId: string,
+    limit: number = 10
+  ): Promise<Array<{ noteId: string; title: string; sharedLabels: string[] }>> {
     const note = await this.getNote(noteId);
-    const relations = note.attributes.filter((a) => a.type === "relation");
-    const linked = await Promise.all(relations.map((r) => this.getNote(r.value).catch(() => null)));
-    return linked.filter((n): n is Note => n !== null);
+    const labels = note.attributes.filter(
+      (a) => a.type === "label" && !a.name.startsWith("sw_") && !["noteType", "llmMemory", "dateStored", "dateUpdated"].includes(a.name)
+    );
+    const existingRelationTargets = new Set(
+      note.attributes.filter((a) => a.type === "relation").map((a) => a.value)
+    );
+    existingRelationTargets.add(noteId);
+
+    if (labels.length === 0) return [];
+
+    const candidates = new Map<string, { title: string; sharedLabels: string[] }>();
+
+    for (const label of labels.slice(0, 6)) {
+      const q = label.value ? `#${label.name}=${label.value}` : `#${label.name}`;
+      try {
+        const res = await this.searchNotes(q, { ancestorNoteId, fastSearch: true, limit: 50 });
+        for (const n of res.results) {
+          if (existingRelationTargets.has(n.noteId)) continue;
+          const labelStr = `${label.name}${label.value ? "=" + label.value : ""}`;
+          const existing = candidates.get(n.noteId);
+          if (existing) {
+            existing.sharedLabels.push(labelStr);
+          } else {
+            candidates.set(n.noteId, { title: n.title, sharedLabels: [labelStr] });
+          }
+        }
+      } catch {
+        // Skip failed label query
+      }
+    }
+
+    return Array.from(candidates.entries())
+      .sort((a, b) => b[1].sharedLabels.length - a[1].sharedLabels.length)
+      .slice(0, limit)
+      .map(([id, data]) => ({ noteId: id, title: data.title, sharedLabels: data.sharedLabels }));
   }
 }
