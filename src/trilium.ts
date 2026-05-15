@@ -493,7 +493,13 @@ export class TriliumClient {
         if (!nextId || visited.has(nextId)) continue;
 
         if (nextId === toId) {
-          // Reconstruct path using accumulated titleMap — no extra API calls
+          // Fetch the target note so its title is available in titleMap
+          try {
+            const targetNote = await this.getNote(toId);
+            titleMap.set(toId, targetNote.title);
+          } catch {
+            // Falls back to "?" if the fetch fails
+          }
           const fullPath = [...current.path, toId];
           const fullVias = [...current.vias, rel.name];
           const result = fullPath.map((id, i) => ({
@@ -777,14 +783,15 @@ export class TriliumClient {
       .map((b) => ({ noteId: b.noteId, title: b.title }));
   }
 
-  // Atomically update the value of an existing label. Falls back to add if not found.
+  // Atomically update the value of an existing label. Removes all duplicates, falls back to add if not found.
   async updateLabelValue(noteId: string, labelName: string, newValue: string): Promise<Attribute> {
     const note = await this.getNote(noteId);
-    const existing = note.attributes.find(
+    const existing = note.attributes.filter(
       (a) => a.type === "label" && a.name === labelName
     );
-    if (existing) {
-      return this.updateAttribute(existing.attributeId, { value: newValue });
+    if (existing.length > 0) {
+      // Delete all occurrences so no stale lifecycle labels survive
+      await Promise.all(existing.map((a) => this.deleteAttribute(a.attributeId)));
     }
     return this.addLabel(noteId, labelName, newValue);
   }
