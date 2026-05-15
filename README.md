@@ -2,7 +2,7 @@
 
 An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://github.com/TriliumNext/Notes) into a persistent, graph-structured second brain for Claude and other LLM clients.
 
-**60 tools** across 9 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
+**60 tools** across 13 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
 
 <div align="center">
 
@@ -19,11 +19,11 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 - **Neural architecture** — engrams (notes), synapses (typed relations), synaptic weights (Hebbian reinforcement), connectome traversal
 - **60 tools** covering the full Trilium ETAPI surface plus high-level memory operations
 - **Zero ID pasting** — `bootstrap_brain` creates the full tree and writes `brain.json` automatically; auto-discovery rebuilds config if the file is missing
-- **Structured spawning** — `spawn_*` tools create properly formatted, labelled notes with `~template` relations wired automatically
-- **Knowledge graph** — BFS path-finding, neighbourhood expansion, full connectome traversal with direction and depth controls
+- **Structured creation** — `create_*` tools produce properly formatted, labelled notes with `~template` relations wired automatically
+- **Knowledge graph** — BFS path-finding, neighbourhood expansion, full graph traversal with direction and depth controls
 - **Token economy** — list/search returns id+title stubs only; content fetched on demand
-- **Revision safety** — `snapshot_engram` before edits; `reinforce` always pre-snapshots
-- **Calendar journal** — day/week/month/year pulse notes for temporal context
+- **Revision safety** — `create_note_revision` before edits; `update_memory` always pre-snapshots
+- **Calendar journal** — day/week/month/year notes for temporal context
 
 ---
 
@@ -172,7 +172,7 @@ root
     │   ├── People
     │   ├── Organizations
     │   ├── Projects
-    │   └── [domain]/          ← spawn_domain creates these
+    │   └── [domain]/          ← create_domain creates these
     │       ├── Concepts/
     │       ├── References/
     │       └── Notes/
@@ -316,12 +316,14 @@ root
 | `#status` | `active` / `pending` / `resolved` / `consolidated` / `triaged` / `superseded` | Lifecycle state |
 | `#topic` | free text | Subject tag for search/filtering |
 | `#domain` | free text (e.g. `Technology`, `Philosophy`) | Knowledge domain |
-| `#dateOpened` / `#dateWritten` / `#dateStarted` | ISO date | Creation timestamps |
+| `#dateOpened` / `#dateWritten` / `#dateStarted` / `#dateStored` | ISO date | Creation timestamps |
 | `#dateUpdated` / `#dateConsolidated` | ISO date | Mutation timestamps |
 | `#mood` | `contemplative` / `passionate` / `uncertain` / `analytical` | Opinion tone |
 | `#archived` | (flag) | Soft-delete — prefer over hard deletion |
 | `#confidence` | `high` / `medium` / `low` | Epistemic confidence |
-| `sw_{type}_{targetId}` | integer | Synaptic weight (Hebbian reinforcement counter) |
+| `#sw_{type}_{targetId}` | integer | Synaptic weight — managed by `strengthen_relation` / `weaken_relation` |
+
+---
 
 ## Relation (Synapse) Vocabulary
 
@@ -342,4 +344,5 @@ root
 | `inspiredBy` | A → B | A was conceptually influenced by B |
 | `sourceOf` | A → B | A is the origin or provenance of B |
 | `derivedFrom` | A → B | A was synthesised from B |
-| `template` | A → B | A uses B as its structural template |
+
+> `~template` is a Trilium-internal relation wired automatically by `create_*` tools. Do not wire it manually.
