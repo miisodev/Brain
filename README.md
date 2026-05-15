@@ -172,11 +172,11 @@ root
     │   ├── People
     │   ├── Organizations
     │   ├── Projects
-    │   └── [domain]/          ← create_domain creates these
+    │   └── [domain]/
     │       ├── Concepts/
     │       ├── References/
     │       └── Notes/
-    ├── 💭 Opinions            ← flat, blog/diary style (no subtrees)
+    ├── 💭 Opinions
     ├── 📅 Log/
     │   ├── Sessions
     │   └── Decisions Made
