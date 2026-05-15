@@ -5,7 +5,7 @@
 export type NoteType =
   | "text" | "code" | "book" | "canvas"
   | "mermaid" | "relationMap" | "render"
-  | "search" | "file" | "image";
+  | "search" | "file" | "image" | "launcher";
 
 // Semantic synapse (relation) vocabulary — the brain's axon labels
 export const SynapseTypes = [

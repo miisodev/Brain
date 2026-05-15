@@ -2,20 +2,28 @@
 
 An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://github.com/TriliumNext/Notes) into a persistent, graph-structured second brain for Claude and other LLM clients.
 
-**55 tools** across 9 categories — neural-vocabulary naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
+**60 tools** across 13 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
+
+<div align="center">
+
+### If Trilium Brain is useful to you, consider supporting its development
+
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-009cde?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/miisodev?locale.x=en_US&country.x=ZA)
+
+</div>
 
 ---
 
 ## Features
 
 - **Neural architecture** — engrams (notes), synapses (typed relations), synaptic weights (Hebbian reinforcement), connectome traversal
-- **55 tools** covering the full Trilium ETAPI surface plus high-level memory operations
+- **60 tools** covering the full Trilium ETAPI surface plus high-level memory operations
 - **Zero ID pasting** — `bootstrap_brain` creates the full tree and writes `brain.json` automatically; auto-discovery rebuilds config if the file is missing
-- **Structured spawning** — `spawn_*` tools create properly formatted, labelled notes with `~template` relations wired automatically
-- **Knowledge graph** — BFS path-finding, neighbourhood expansion, full connectome traversal with direction and depth controls
+- **Structured creation** — `create_*` tools produce properly formatted, labelled notes with `~template` relations wired automatically
+- **Knowledge graph** — BFS path-finding, neighbourhood expansion, full graph traversal with direction and depth controls
 - **Token economy** — list/search returns id+title stubs only; content fetched on demand
-- **Revision safety** — `snapshot_engram` before edits; `reinforce` always pre-snapshots
-- **Calendar journal** — day/week/month/year pulse notes for temporal context
+- **Revision safety** — `create_note_revision` before edits; `update_memory` always pre-snapshots
+- **Calendar journal** — day/week/month/year notes for temporal context
 
 ---
 
@@ -127,8 +135,8 @@ Upload `SKILL.md` as a project knowledge file. Every conversation in that projec
 ### Option C — Store in Trilium (self-loading)
 
 ```
-imprint(section="knowledge", title="Trilium Brain Skill", content=<SKILL.md contents>)
-imprint_label(noteId=..., name="skill", value="trilium-brain")
+store_memory(section="knowledge", title="Trilium Brain Skill", content=<SKILL.md contents>)
+add_label(noteId=..., name="skill", value="trilium-brain")
 ```
 
 At the start of any session: *"Load my Trilium Brain skill note and follow its session protocol."*
@@ -164,11 +172,11 @@ root
     │   ├── People
     │   ├── Organizations
     │   ├── Projects
-    │   └── [domain]/          ← spawn_domain creates these
+    │   └── [domain]/
     │       ├── Concepts/
     │       ├── References/
     │       └── Notes/
-    ├── 💭 Opinions            ← flat, blog/diary style (no subtrees)
+    ├── 💭 Opinions
     ├── 📅 Log/
     │   ├── Sessions
     │   └── Decisions Made
@@ -178,7 +186,8 @@ root
         ├── Concept
         ├── Project Brief
         ├── Person
-        └── Opinion
+        ├── Opinion
+        └── Domain
 ```
 
 ---
@@ -188,108 +197,113 @@ root
 ### Session / Orientation
 | Tool | Description |
 |------|-------------|
-| `ignite_cortex` | Boot session — returns three-level brain tree with all structural IDs. Call once per session. |
-| `crystallize_session` | Persist structured session summary into Log → Sessions. |
+| `start_session` | Boot session — returns three-level brain tree with all structural IDs. Call once per session, never again mid-session. |
+| `log_session` | Persist structured session summary into Log → Sessions. Call at end of every session. |
+| `get_brain_config` | Return the live brain.json config (all structural note IDs). |
 
 ### Search
 | Tool | Description |
 |------|-------------|
-| `scan_engrams` | Full Trilium search — text, `#label=value`, date operators, subtree scope |
-| `trace_signal` | Fast label search: `#name=value` shorthand. Best for structured retrieval. |
-| `pulse_recent` | Up to 50 recently modified engrams, newest first. |
+| `search_notes` | Full Trilium search — text, `#label=value`, date operators, subtree scope. |
+| `search_notes_by_label` | Fast label search: `#name=value` shorthand. Best for structured retrieval. |
+| `get_recent_notes` | Up to 50 recently modified notes, newest first. |
 
-### Engram CRUD
+### Note CRUD
 | Tool | Description |
 |------|-------------|
-| `retrieve_engram` | Metadata only (attributes, parents, children). No content. |
-| `decode_engram` | Raw content only. |
-| `read_engram` | Metadata + content in one call. |
-| `encode_engram` | Create a raw note at any location. |
-| `rewrite_engram` | Replace full content (no automatic pre-snapshot). |
-| `morph_engram` | Mutate title, type, or MIME without touching content. |
-| `dissolve_engram` | Delete a note permanently. Prefer `imprint_label(#archived)` instead. |
+| `get_note` | Metadata only (attributes, parents, children). No content. |
+| `get_note_content` | Raw content only. |
+| `get_note_with_content` | Metadata + content in one call. |
+| `create_note` | Create a raw note at any location. |
+| `update_note_content` | Replace full content (no automatic pre-snapshot). |
+| `patch_note` | Mutate title, type, or MIME without touching content. |
+| `delete_note` | Delete a note permanently. Prefer `add_label(#archived)` instead. |
 
 ### Structure / Branching
 | Tool | Description |
 |------|-------------|
-| `graft_engram` | Place an engram in an additional parent (multi-parent, shared content). |
-| `migrate_engram` | Move an engram to a new parent. |
+| `clone_note` | Place a note in an additional parent (multi-parent, shared content). |
+| `move_note` | Move a note to a new parent. |
 
-### Synaptic Attributes
+### Attributes
 | Tool | Description |
 |------|-------------|
-| `imprint_label` | Add `#key=value` label. |
-| `synapse` | Create a typed directional relation between two engrams. |
-| `desynapse` | Remove a named relation by source + type + target. |
-| `prune_attribute` | Delete any attribute by raw attributeId. |
-| `strengthen_synapse` | Increment synaptic weight (Hebbian reinforcement). |
-| `list_synapse_types` | Discover all relation type names in use. |
-| `query_synapses` | Find all engrams connected via a specific synapse type. |
+| `add_label` | Add `#key=value` label to a note. |
+| `update_label` | Update an existing label value in-place (atomic PATCH). |
+| `add_relation` | Create a typed directional relation between two notes. |
+| `delete_relation` | Remove a named relation by source + type + target. |
+| `delete_attribute` | Delete any attribute by raw attributeId. |
+| `strengthen_relation` | Increment synaptic weight (+1). Call after traversing a path that proved useful. |
+| `weaken_relation` | Decrement synaptic weight (floors at 0, label removed). Call when a path was misleading or stale. |
+| `get_relation_types` | Discover all relation type names in use across the brain. |
+| `get_related_notes` | Find all notes connected via a specific relation type. |
 
-### Graph / Connectome
+### Graph / Relations
 | Tool | Description |
 |------|-------------|
-| `trace_efferents` | Outgoing relations from a note (includes synaptic weights). |
-| `trace_afferents` | Incoming relations into a note (backlinks). |
-| `find_neural_path` | Shortest BFS path connecting two engrams. |
-| `expand_neighborhood` | All engrams within N hops (center node included at depth=0). |
-| `traverse_connectome` | Full graph walk with direction, type filter, depth, and node cap. |
+| `get_outgoing_relations` | Outgoing relations from a note (includes synaptic weights). |
+| `get_incoming_relations` | Incoming relations into a note (backlinks). |
+| `find_relation_path` | Shortest BFS path connecting two notes. |
+| `get_note_neighborhood` | All notes within N hops (center node included at depth=0). |
+| `traverse_graph` | Full graph walk with direction, type filter, depth, and node cap. |
 
-### Structured Spawn
+### Structured Creation
 | Tool | Description |
 |------|-------------|
-| `spawn_thread` | Reasoning thread in Working Memory → Threads. |
-| `spawn_decision` | ADR-format decision record in Working Memory → Decisions. |
-| `spawn_concept` | Atomic concept under Knowledge → [domain] → Concepts. |
-| `spawn_domain` | New domain subtree with Concepts / References / Notes subfolders. |
-| `spawn_opinion` | Blog/diary-style opinion entry under Opinions (flat). |
-| `spawn_project` | Structured project brief under Knowledge → Projects. |
+| `create_thread` | Reasoning thread in Working Memory → Threads. |
+| `create_decision` | ADR-format decision record in Working Memory → Decisions. |
+| `create_concept` | Atomic concept under Knowledge → [domain] → Concepts. |
+| `create_domain` | New domain subtree with Concepts / References / Notes subfolders. |
+| `create_opinion` | Blog/diary-style opinion entry under Opinions (flat). |
+| `create_project` | Structured project brief under Knowledge → Projects. |
 
 ### Memory / Recall
 | Tool | Description |
 |------|-------------|
-| `recall` | Search memory sections with inline content snippets for top 3 matches. |
-| `imprint` | Persist a new engram into a memory section with auto-labels. |
-| `reinforce` | Update an existing engram — pre-snapshots then overwrites. |
-| `weave_thread` | `append / close / list` thread lifecycle management. |
+| `recall_memory` | Search memory sections with inline content snippets for top 3 matches. |
+| `store_memory` | Persist a new note into a memory section with auto-labels. |
+| `update_memory` | Update an existing memory note — pre-snapshots then overwrites. |
+| `manage_thread` | `append / close / list` thread lifecycle management. |
 | `triage_inbox` | `list / promote / discard` inbox items. |
-| `consolidate` | Promote a Working Memory engram to durable Knowledge (`~derivedFrom` wired). |
+| `promote_to_knowledge` | Promote a Working Memory note to durable Knowledge (`~derivedFrom` wired). |
 
 ### Maintenance
 | Tool | Description |
 |------|-------------|
-| `scan_orphans` | Find structured engrams with no relations and no meaningful labels. |
-| `suggest_synapses` | Candidate connections based on shared labels (ranked by overlap). |
-| `bulk_imprint` | Apply a label to multiple engrams in one call. |
+| `find_orphan_notes` | Find structured notes with no relations and no meaningful labels. |
+| `suggest_connections` | Candidate connections based on shared labels (ranked by overlap). |
+| `bulk_add_label` | Apply a label to multiple notes in one call. |
 
-### Artifacts
+### Attachments
 | Tool | Description |
 |------|-------------|
-| `list_artifacts` | List attachments on an engram (id+title+mime+size). |
-| `read_artifact` | Read attachment content. |
-| `attach_artifact` | Attach a file or text blob to an engram. |
+| `get_note_attachments` | List attachments on a note (id+title+mime+size). |
+| `get_attachment_content` | Read attachment content. |
+| `create_attachment` | Attach a file or text blob to a note. |
+| `delete_attachment` | Delete an attachment permanently. |
+| `update_attachment` | Update attachment metadata (title, mime). |
 
-### Snapshots (Revisions)
+### Revisions
 | Tool | Description |
 |------|-------------|
-| `list_snapshots` | All saved revisions, newest first. |
-| `read_snapshot` | Content of a historical revision. |
-| `snapshot_engram` | Manually save a revision before significant edits. |
+| `get_note_revisions` | All saved revisions, newest first. |
+| `get_revision_content` | Content of a historical revision. |
+| `create_note_revision` | Manually save a revision before significant edits. |
 
-### Calendar Pulses
+### Calendar
 | Tool | Description |
 |------|-------------|
-| `get_day_pulse` | Get/create today's journal day note. |
-| `get_week_pulse` | Get/create week note (YYYY-Www). |
-| `get_month_pulse` | Get/create month note (YYYY-MM). |
-| `get_year_pulse` | Get/create year note (YYYY). |
-| `get_inbox_pulse` | Get the Trilium calendar inbox note for a date. |
+| `get_day_note` | Get/create today's journal day note. |
+| `get_week_note` | Get/create week note (YYYY-Www). |
+| `get_month_note` | Get/create month note (YYYY-MM). |
+| `get_year_note` | Get/create year note (YYYY). |
+| `get_inbox_note` | Get the Trilium calendar inbox note for a date. |
 
 ### System
 | Tool | Description |
 |------|-------------|
-| `synaptic_status` | Trilium server version, DB version, runtime metadata. |
-| `backup_cortex` | Trigger a named DB backup (`brain-{date}.db`). |
+| `get_app_info` | Trilium server version, DB version, runtime metadata. |
+| `create_backup` | Trigger a named DB backup (`brain-{date}.db`). |
 | `bootstrap_brain` | Initialize or inspect the full brain hierarchy. Writes `brain.json` and activates config live. |
 
 ---
@@ -302,12 +316,14 @@ root
 | `#status` | `active` / `pending` / `resolved` / `consolidated` / `triaged` / `superseded` | Lifecycle state |
 | `#topic` | free text | Subject tag for search/filtering |
 | `#domain` | free text (e.g. `Technology`, `Philosophy`) | Knowledge domain |
-| `#dateOpened` / `#dateWritten` / `#dateStarted` | ISO date | Creation timestamps |
+| `#dateOpened` / `#dateWritten` / `#dateStarted` / `#dateStored` | ISO date | Creation timestamps |
 | `#dateUpdated` / `#dateConsolidated` | ISO date | Mutation timestamps |
 | `#mood` | `contemplative` / `passionate` / `uncertain` / `analytical` | Opinion tone |
 | `#archived` | (flag) | Soft-delete — prefer over hard deletion |
 | `#confidence` | `high` / `medium` / `low` | Epistemic confidence |
-| `sw_{type}_{targetId}` | integer | Synaptic weight (Hebbian reinforcement counter) |
+| `#sw_{type}_{targetId}` | integer | Synaptic weight — managed by `strengthen_relation` / `weaken_relation` |
+
+---
 
 ## Relation (Synapse) Vocabulary
 
@@ -328,4 +344,5 @@ root
 | `inspiredBy` | A → B | A was conceptually influenced by B |
 | `sourceOf` | A → B | A is the origin or provenance of B |
 | `derivedFrom` | A → B | A was synthesised from B |
-| `template` | A → B | A uses B as its structural template |
+
+> `~template` is a Trilium-internal relation wired automatically by `create_*` tools. Do not wire it manually.

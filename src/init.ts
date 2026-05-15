@@ -15,6 +15,7 @@ import {
   personContent,
   projectContent,
   opinionContent,
+  domainContent,
 } from "./templates.js";
 
 const baseUrl = process.env.TRILIUM_BASE_URL;
@@ -121,13 +122,14 @@ const templates = await trilium.createNote(rootId, "Templates",
   "<p><em>Structural templates — used by spawn_* tools.</em></p>");
 log("templates.root", templates.note.noteId);
 
-const [tThread, tDecision, tConcept, tProject, tPerson, tOpinion] = await Promise.all([
+const [tThread, tDecision, tConcept, tProject, tPerson, tOpinion, tDomain] = await Promise.all([
   trilium.createNote(templates.note.noteId, "Thread",        threadContent("", today)),
   trilium.createNote(templates.note.noteId, "Decision",      decisionContent("")),
   trilium.createNote(templates.note.noteId, "Concept",       conceptContent("general")),
   trilium.createNote(templates.note.noteId, "Project Brief", projectContent("", today)),
   trilium.createNote(templates.note.noteId, "Person",        personContent("", "")),
   trilium.createNote(templates.note.noteId, "Opinion",       opinionContent(today, "contemplative")),
+  trilium.createNote(templates.note.noteId, "Domain",        domainContent("general")),
 ]);
 log("templates.thread",       tThread.note.noteId);
 log("templates.decision",     tDecision.note.noteId);
@@ -135,6 +137,7 @@ log("templates.concept",      tConcept.note.noteId);
 log("templates.projectBrief", tProject.note.noteId);
 log("templates.person",       tPerson.note.noteId);
 log("templates.opinion",      tOpinion.note.noteId);
+log("templates.domain",       tDomain.note.noteId);
 
 // ── Write brain.json ──────────────────────────────────────────────────────────
 
@@ -173,6 +176,7 @@ const config = {
     projectBrief: created["templates.projectBrief"],
     person:       created["templates.person"],
     opinion:      created["templates.opinion"],
+    domain:       created["templates.domain"],
   },
 };
 

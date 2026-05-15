@@ -366,6 +366,16 @@ export class TriliumClient {
     return this.request<void>(`/attachments/${attachmentId}`, { method: "DELETE" });
   }
 
+  async updateAttachment(
+    attachmentId: string,
+    fields: { title?: string; mime?: string }
+  ): Promise<Attachment> {
+    return this.request<Attachment>(`/attachments/${attachmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    });
+  }
+
   // ── Calendar / special notes ───────────────────────────────────────────────
 
   async getDayNote(date: string): Promise<{ noteId: string; title: string }> {
@@ -436,22 +446,15 @@ export class TriliumClient {
       // Search not supported — return empty
     }
 
-    // Verify and extract relation names from actual attribute data
-    await Promise.all(
-      results.map(async (n) => {
-        try {
-          const full = await this.getNote(n.noteId);
-          const rels = full.attributes.filter(
-            (a) => a.type === "relation" && a.value === noteId
-          );
-          for (const rel of rels) {
-            backlinks.push({ noteId: n.noteId, title: n.title, relationName: rel.name });
-          }
-        } catch {
-          // Skip inaccessible notes
-        }
-      })
-    );
+    // Extract relation names directly from search result attributes (avoids N+1 fetches)
+    for (const n of results) {
+      const rels = n.attributes.filter(
+        (a) => a.type === "relation" && a.value === noteId
+      );
+      for (const rel of rels) {
+        backlinks.push({ noteId: n.noteId, title: n.title, relationName: rel.name });
+      }
+    }
 
     return backlinks;
   }
@@ -463,6 +466,7 @@ export class TriliumClient {
     maxDepth: number = 6
   ): Promise<Array<{ noteId: string; title: string; via?: string }> | null> {
     const visited = new Map<string, string[]>(); // noteId → path of IDs
+    const titleMap = new Map<string, string>(); // accumulate titles during BFS
     const queue: Array<{ id: string; path: string[]; vias: string[] }> = [
       { id: fromId, path: [fromId], vias: [] },
     ];
@@ -481,24 +485,22 @@ export class TriliumClient {
         continue;
       }
 
+      titleMap.set(note.noteId, note.title);
+
       const relations = note.attributes.filter((a) => a.type === "relation");
       for (const rel of relations) {
         const nextId = rel.value;
-        if (visited.has(nextId)) continue;
+        if (!nextId || visited.has(nextId)) continue;
 
         if (nextId === toId) {
-          // Reconstruct path with titles
+          // Reconstruct path using accumulated titleMap — no extra API calls
           const fullPath = [...current.path, toId];
           const fullVias = [...current.vias, rel.name];
-          const result: Array<{ noteId: string; title: string; via?: string }> = [];
-          for (let i = 0; i < fullPath.length; i++) {
-            try {
-              const n = await this.getNote(fullPath[i]);
-              result.push({ noteId: n.noteId, title: n.title, via: fullVias[i - 1] });
-            } catch {
-              result.push({ noteId: fullPath[i], title: "?", via: fullVias[i - 1] });
-            }
-          }
+          const result = fullPath.map((id, i) => ({
+            noteId: id,
+            title: titleMap.get(id) ?? "?",
+            via: i > 0 ? fullVias[i - 1] : undefined,
+          }));
           return result;
         }
 
@@ -547,7 +549,7 @@ export class TriliumClient {
           (a) => a.type === "relation" && (!relationType || a.name === relationType)
         );
         for (const rel of relations) {
-          if (!visited.has(rel.value)) {
+          if (rel.value && !visited.has(rel.value)) {
             queue.push({ id: rel.value, dist: current.dist + 1, via: rel.name, from: current.id });
           }
         }
@@ -600,7 +602,7 @@ export class TriliumClient {
             (a) => a.type === "relation" && (!relationType || a.name === relationType)
           );
           for (const rel of rels) {
-            if (!visited.has(rel.value)) {
+            if (rel.value && !visited.has(rel.value)) {
               queue.push({ id: rel.value, dist: current.dist + 1, via: rel.name, from: current.id });
             }
           }
@@ -650,7 +652,11 @@ export class TriliumClient {
         `No '${relationName}' relation found from ${fromNoteId} to ${toNoteId}`
       );
     }
-    await this.deleteAttribute(rel.attributeId);
+    try {
+      await this.deleteAttribute(rel.attributeId);
+    } catch (err) {
+      throw new Error(`Found relation '${relationName}' (${rel.attributeId}) but failed to delete it: ${err}`);
+    }
   }
 
   // Increment the synaptic weight for a relation (Hebbian-style strengthening)
@@ -660,6 +666,12 @@ export class TriliumClient {
     toNoteId: string
   ): Promise<{ strength: number; labelId: string }> {
     const note = await this.getNote(fromNoteId);
+    const relation = note.attributes.find(
+      (a) => a.type === "relation" && a.name === relationName && a.value === toNoteId
+    );
+    if (!relation) {
+      throw new Error(`No '${relationName}' relation found from ${fromNoteId} to ${toNoteId}. Create it with add_relation first.`);
+    }
     const labelName = `sw_${relationName}_${toNoteId}`;
     const existing = note.attributes.find(
       (a) => a.type === "label" && a.name === labelName
@@ -675,6 +687,36 @@ export class TriliumClient {
 
     const created = await this.addLabel(fromNoteId, labelName, "1");
     return { strength: 1, labelId: created.attributeId };
+  }
+
+  // Decrement the synaptic weight for a relation (counter-Hebbian weakening)
+  async weakenSynapse(
+    fromNoteId: string,
+    relationName: string,
+    toNoteId: string,
+    by = 1
+  ): Promise<{ strength: number; labelId: string | null }> {
+    const note = await this.getNote(fromNoteId);
+    const relation = note.attributes.find(
+      (a) => a.type === "relation" && a.name === relationName && a.value === toNoteId
+    );
+    if (!relation) {
+      throw new Error(`No '${relationName}' relation found from ${fromNoteId} to ${toNoteId}.`);
+    }
+    const labelName = `sw_${relationName}_${toNoteId}`;
+    const existing = note.attributes.find(
+      (a) => a.type === "label" && a.name === labelName
+    );
+    if (!existing) {
+      return { strength: 0, labelId: null };
+    }
+    const newStrength = Math.max(0, (parseInt(existing.value, 10) || 0) - by);
+    if (newStrength === 0) {
+      await this.deleteAttribute(existing.attributeId);
+      return { strength: 0, labelId: null };
+    }
+    const updated = await this.updateAttribute(existing.attributeId, { value: String(newStrength) });
+    return { strength: newStrength, labelId: updated.attributeId };
   }
 
   // Get the strength of a specific relation
@@ -697,14 +739,9 @@ export class TriliumClient {
         fastSearch: true,
       });
       for (const n of res.results) {
-        try {
-          const full = await this.getNote(n.noteId);
-          full.attributes
-            .filter((a) => a.type === "relation" && !a.name.startsWith("sw_"))
-            .forEach((a) => types.add(a.name));
-        } catch {
-          // Skip inaccessible notes
-        }
+        n.attributes
+          .filter((a) => a.type === "relation" && !a.name.startsWith("sw_"))
+          .forEach((a) => types.add(a.name));
       }
     } catch {
       // Return empty set on failure
@@ -738,6 +775,18 @@ export class TriliumClient {
     return backlinks
       .filter((b) => b.relationName === relationName)
       .map((b) => ({ noteId: b.noteId, title: b.title }));
+  }
+
+  // Atomically update the value of an existing label. Falls back to add if not found.
+  async updateLabelValue(noteId: string, labelName: string, newValue: string): Promise<Attribute> {
+    const note = await this.getNote(noteId);
+    const existing = note.attributes.find(
+      (a) => a.type === "label" && a.name === labelName
+    );
+    if (existing) {
+      return this.updateAttribute(existing.attributeId, { value: newValue });
+    }
+    return this.addLabel(noteId, labelName, newValue);
   }
 
   // ── Bulk operations ────────────────────────────────────────────────────────

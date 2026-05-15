@@ -43,9 +43,9 @@ try {
 } catch (err) { fail("searchNotes", err); }
 
 try {
-  const result = await trilium.searchNotes("#llmMemory", { fastSearch: true, limit: 5 });
-  pass("searchNotes #llmMemory (fast)", `${result.results.length} results`);
-} catch (err) { fail("searchNotes #llmMemory", err); }
+  const result = await trilium.searchNotes("#noteType", { fastSearch: true, limit: 5 });
+  pass("searchNotes #noteType (fast)", `${result.results.length} results`);
+} catch (err) { fail("searchNotes #noteType", err); }
 
 // ── Note CRUD ─────────────────────────────────────────────────────────────────
 let testNoteId = "";
@@ -88,9 +88,9 @@ if (testNoteId) {
   } catch (err) { fail("addLabel", err); }
 
   try {
-    await trilium.addLabel(testNoteId, "llmMemory", "knowledge");
-    pass("addLabel llmMemory");
-  } catch (err) { fail("addLabel llmMemory", err); }
+    await trilium.addLabel(testNoteId, "noteType", "knowledge");
+    pass("addLabel noteType");
+  } catch (err) { fail("addLabel noteType", err); }
 
   try {
     const byLabel = await trilium.getNotesByLabel("testLabel", "hello");

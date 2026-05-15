@@ -19,7 +19,7 @@ export interface BrainConfig {
   knowledge: { root: string; people: string; organizations: string; projects: string };
   opinions: string;
   log: { root: string; sessions: string; decisionsMade: string };
-  templates: { root: string; thread: string; decision: string; concept: string; projectBrief: string; person: string; opinion: string };
+  templates: { root: string; thread: string; decision: string; concept: string; projectBrief: string; person: string; opinion: string; domain: string };
 }
 
 export const EMPTY_BRAIN: BrainConfig = {
@@ -29,7 +29,7 @@ export const EMPTY_BRAIN: BrainConfig = {
   knowledge:     { root: "", people: "", organizations: "", projects: "" },
   opinions:      "",
   log:           { root: "", sessions: "", decisionsMade: "" },
-  templates:     { root: "", thread: "", decision: "", concept: "", projectBrief: "", person: "", opinion: "" },
+  templates:     { root: "", thread: "", decision: "", concept: "", projectBrief: "", person: "", opinion: "", domain: "" },
 };
 
 // ── File path ─────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export function saveConfig(config: BrainConfig): string {
 export async function discoverBrain(trilium: TriliumClient): Promise<BrainConfig | null> {
   let rootId: string | null = null;
   try {
-    const res = await trilium.searchNotes('note.title = "Trilium Brain"', { limit: 5 });
+    const res = await trilium.searchNotes('note.title = "Trilium Brain" #iconClass', { limit: 5 });
     const match = res.results.find((n) => n.title === "Trilium Brain");
     if (match) rootId = match.noteId;
   } catch {
@@ -113,13 +113,20 @@ export async function discoverBrain(trilium: TriliumClient): Promise<BrainConfig
           config.log = { root: id, sessions: g("Sessions"), decisionsMade: g("Decisions Made") };
           break;
         case "Templates":
-          config.templates = { root: id, thread: g("Thread"), decision: g("Decision"), concept: g("Concept"), projectBrief: g("Project Brief"), person: g("Person"), opinion: g("Opinion") };
+          config.templates = { root: id, thread: g("Thread"), decision: g("Decision"), concept: g("Concept"), projectBrief: g("Project Brief"), person: g("Person"), opinion: g("Opinion"), domain: g("Domain") };
           break;
       }
     }
   } catch {
     return null;
   }
+
+  // Validate that required structural IDs are populated
+  const requiredIds = [
+    config.identity.root, config.workingMemory.root, config.knowledge.root,
+    config.log.root, config.templates.root,
+  ];
+  if (requiredIds.some((id) => !id)) return null;
 
   return config;
 }
