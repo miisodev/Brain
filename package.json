@@ -1,6 +1,7 @@
 {
   "name": "trilium-brain",
   "version": "3.0.0",
+  "description": "MCP server that turns TriliumNext Notes into a persistent, graph-structured second brain for Claude and other LLM clients.",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun",

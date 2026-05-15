@@ -1,9 +1,9 @@
 /**
- * init.ts — One-shot bootstrapper for a fresh Trilium Brain instance.
- * Run with: bun run src/init.ts
+ * init.ts — One-shot CLI bootstrapper for a fresh Trilium Brain instance.
+ * Run with: bun run init  (or: TRILIUM_BASE_URL=... TRILIUM_ETAPI_TOKEN=... bun run src/init.ts)
  *
- * Prints all created noteIds and the constants.ts snippet — paste into
- * src/constants.ts then run: bun run build
+ * Creates the full brain hierarchy in Trilium and writes brain.json next to
+ * the bundle. No manual ID copying or rebuild required.
  */
 
 import { TriliumClient } from "./trilium.js";
