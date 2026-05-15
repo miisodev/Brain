@@ -400,3 +400,9 @@ root
 | `derivedFrom` | A → B | A was synthesised from B |
 
 > `~template` is a Trilium-internal relation wired automatically by `create_*` tools. Do not wire it manually.
+
+---
+
+## Credits
+
+- [TriliumNext Notes](https://github.com/TriliumNext/Notes) — the open-source, self-hosted knowledge base that powers this MCP server's backend. Trilium Brain would not exist without the TriliumNext team's work on TriliumNext Notes and its ETAPI.
