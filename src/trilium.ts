@@ -423,23 +423,17 @@ export class TriliumClient {
   async getBacklinks(noteId: string): Promise<Array<{ noteId: string; title: string; relationName: string }>> {
     const backlinks: Array<{ noteId: string; title: string; relationName: string }> = [];
 
-    // Try Trilium expression search for owned relations by value
-    const queries = [
-      `note.ownedRelations.value = "${noteId}"`,
-      `note.relations.*.noteId = "${noteId}"`,
-    ];
-
+    // Search for notes that own a relation attribute whose value is this noteId.
+    // Uses documented ownedAttributes property filter syntax.
     let results: Note[] = [];
-    for (const q of queries) {
-      try {
-        const res = await this.searchNotes(q, { limit: 200, includeArchivedNotes: true });
-        if (res.results.length > 0) {
-          results = res.results;
-          break;
-        }
-      } catch {
-        // Try next query form
-      }
+    try {
+      const res = await this.searchNotes(
+        `note.ownedAttributes.type = "relation" && note.ownedAttributes.value = "${noteId}"`,
+        { limit: 200, includeArchivedNotes: true }
+      );
+      results = res.results;
+    } catch {
+      // Search not supported — return empty
     }
 
     // Verify and extract relation names from actual attribute data

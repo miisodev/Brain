@@ -752,7 +752,7 @@ Automatically adds: #noteType=concept  #domain={domain}`,
       let parentId = domainNoteId;
       if (!parentId) {
         try {
-          const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
+          const res = await trilium.searchNotes(`#noteType=domain #domain="${domain}"`, {
             ancestorNoteId: b().knowledge.root,
             fastSearch: true,
             limit: 1,
@@ -1024,6 +1024,10 @@ Use spawn_thread to create a new thread with proper formatting.`,
           `<h2>Resolution</h2>${resHtml}`
         );
         await trilium.updateNoteContent(noteId, updated.includes(resHtml) ? updated : existing + `<h2>Resolution</h2>${resHtml}`);
+        // Replace #status=active with #status=resolved so list action no longer surfaces this thread
+        const meta = await trilium.getNote(noteId);
+        const activeAttr = meta.attributes.find((a) => a.type === "label" && a.name === "status" && a.value === "active");
+        if (activeAttr) await trilium.deleteAttribute(activeAttr.attributeId);
         await trilium.addLabel(noteId, "status", "resolved");
         await trilium.addLabel(noteId, "dateClosed", d);
         return txt({ noteId, action: "closed", date: d });
@@ -1072,16 +1076,13 @@ Use get_inbox_pulse to find today's Trilium inbox note, or use the static inbox 
           opinions:      b().opinions,
         };
         const destId = targetNoteId ?? (targetSection ? sectionMap[targetSection] : b().workingMemory.root);
+        // Capture existing branch IDs before cloning so we remove all source locations,
+        // whether the item came from the static WM inbox or a calendar inbox note.
+        const before = await trilium.getNote(noteId);
+        const originalBranchIds = [...before.parentBranchIds];
         const newBranch = await trilium.cloneNote(noteId, destId);
-        // Remove old inbox branch
-        const fresh = await trilium.getNote(noteId);
-        for (const bid of fresh.parentBranchIds) {
-          if (bid === newBranch.branchId) continue;
-          const branch = await trilium.getBranch(bid).catch(() => null);
-          if (branch?.parentNoteId === inboxId) {
-            await trilium.deleteBranch(bid);
-            break;
-          }
+        for (const bid of originalBranchIds) {
+          await trilium.deleteBranch(bid).catch(() => null);
         }
         await trilium.addLabel(noteId, "status", "triaged");
         return txt({ ok: true, noteId, movedTo: destId, newBranchId: newBranch.branchId });
@@ -1115,7 +1116,7 @@ Use when a thread has yielded reusable knowledge worth preserving.`,
       let parentId = domainNoteId;
       if (!parentId && domain) {
         try {
-          const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
+          const res = await trilium.searchNotes(`#noteType=domain #domain="${domain}"`, {
             ancestorNoteId: b().knowledge.root, fastSearch: true, limit: 1,
           });
           parentId = res.results[0]?.noteId;
@@ -1139,6 +1140,12 @@ Use when a thread has yielded reusable knowledge worth preserving.`,
       ]);
 
       if (closeSource !== false) {
+        // Replace any active/pending status so the thread no longer surfaces in weave_thread list
+        const srcMeta = await trilium.getNote(sourceNoteId);
+        const activeAttr = srcMeta.attributes.find(
+          (a) => a.type === "label" && a.name === "status" && (a.value === "active" || a.value === "pending")
+        );
+        if (activeAttr) await trilium.deleteAttribute(activeAttr.attributeId);
         await trilium.addLabel(sourceNoteId, "status", "consolidated");
       }
 
@@ -1168,8 +1175,12 @@ Searches within ancestorNoteId scope (default: knowledge root).`,
         try {
           const full = await trilium.getNote(n.noteId);
           const hasRelations = full.attributes.some((a) => a.type === "relation");
+          const BOOKKEEPING = new Set([
+            "noteType","status","dateStored","dateUpdated","dateConsolidated",
+            "dateOpened","dateStarted","dateWritten","dateClosed","sessionDate","mood",
+          ]);
           const hasMeaningfulLabels = full.attributes.some(
-            (a) => a.type === "label" && !["noteType","dateStored","dateUpdated","dateConsolidated"].includes(a.name)
+            (a) => a.type === "label" && !BOOKKEEPING.has(a.name)
           );
           if (!hasRelations && !hasMeaningfulLabels) {
             orphans.push(noteStub(full));
