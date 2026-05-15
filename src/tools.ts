@@ -717,7 +717,8 @@ Automatically adds: #noteType=thread  #status=active  #dateOpened`,
     },
     async ({ title, context, topic, date }) => {
       const d = date ?? today();
-      const parentId = b().workingMemory.threads || b().workingMemory.root;
+      const parentId = b().workingMemory.threads;
+      if (!parentId) throw new Error("Brain config incomplete — run bootstrap_brain first");
       const result = await trilium.createNote(parentId, title, threadContent(context ?? "", d));
       const nid = result.note.noteId;
       await Promise.all([
@@ -746,7 +747,8 @@ Automatically adds: #noteType=decision  #status=pending  #dateOpened`,
     },
     async ({ title, context, topic, date }) => {
       const d = date ?? today();
-      const parentId = b().workingMemory.decisions || b().workingMemory.root;
+      const parentId = b().workingMemory.decisions;
+      if (!parentId) throw new Error("Brain config incomplete — run bootstrap_brain first");
       const result = await trilium.createNote(parentId, title, decisionContent(context ?? ""));
       const nid = result.note.noteId;
       await Promise.all([
@@ -958,9 +960,10 @@ Use at session start to orient before acting, and before creating new notes (avo
   server.tool(
     "store_memory",
     `Persist a new note into the appropriate memory section with standard labels.
-  • identity      → facts about the user / system
-  • workingMemory → active threads, open questions, current decisions
-  • knowledge     → durable facts, how-to, reference material
+  • identity      → facts about the user / system (Profile, Preferences, Context)
+  • workingMemory → unstructured captures; lands in Inbox for triage. For structured types use
+                    create_thread / create_decision / create_note(parentNoteId=<openQuestionsId>)
+  • knowledge     → durable facts, how-to, reference material. Use subsectionId for domain placement.
   • opinions      → use create_opinion for proper diary format
 Adds #noteType, #dateStored, and optional #topic label automatically.`,
     {
@@ -973,7 +976,7 @@ Adds #noteType, #dateStored, and optional #topic label automatically.`,
     async ({ section, title, content, topic, subsectionId }) => {
       const parentMap: Record<string, string> = {
         identity:      b().identity.root,
-        workingMemory: b().workingMemory.root,
+        workingMemory: b().workingMemory.inbox || b().workingMemory.root,
         knowledge:     b().knowledge.root,
         opinions:      b().opinions,
       };
@@ -1095,12 +1098,15 @@ Use get_inbox_note to find today's Trilium inbox note, or use the static inbox f
       }
 
       if (action === "promote") {
+        if (!targetNoteId && !targetSection) {
+          throw new Error("promote requires targetNoteId or targetSection (workingMemory → Threads, knowledge, opinions)");
+        }
         const sectionMap: Record<string, string> = {
           workingMemory: b().workingMemory.threads || b().workingMemory.root,
           knowledge:     b().knowledge.root,
           opinions:      b().opinions,
         };
-        const destId = targetNoteId ?? (targetSection ? sectionMap[targetSection] : b().workingMemory.root);
+        const destId = targetNoteId ?? sectionMap[targetSection!];
         // Capture existing branch IDs before cloning so we remove all source locations,
         // whether the item came from the static WM inbox or a calendar inbox note.
         const before = await trilium.getNote(noteId);

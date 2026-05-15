@@ -538,6 +538,7 @@ Before creating any note:
 | `manage_thread(action="close")` fails | Note must have `#noteType=thread`; verify with `get_note` |
 | `promote_to_knowledge` creates a second domain folder | Pass `domainNoteId`; don't rely on domain name lookup alone |
 | `strengthen_relation` / `weaken_relation` — "no relation found" | Relation doesn't exist yet — call `add_relation` first |
+| `triage_inbox(action="promote")` errors "requires targetNoteId or targetSection" | Always provide a destination — promote requires knowing where to route the note |
 | `triage_inbox(action="promote")` leaves original in inbox | Tool clones then deletes all source branches; if it failed mid-way check `get_recent_notes` for orphaned clone |
 | `log_session` creates a duplicate for today | Always `search_notes_by_label("sessionDate", "<today>")` before calling |
 | `update_label` fails — attribute not found | `get_note` and find the correct attributeId from the `attributes` array |
