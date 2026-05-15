@@ -783,15 +783,20 @@ export class TriliumClient {
       .map((b) => ({ noteId: b.noteId, title: b.title }));
   }
 
-  // Atomically update the value of an existing label. Removes all duplicates, falls back to add if not found.
+  // Update the value of an existing label in-place (preserving isInheritable/position).
+  // Deduplicates any extra labels with the same name. Falls back to add if none exist.
   async updateLabelValue(noteId: string, labelName: string, newValue: string): Promise<Attribute> {
     const note = await this.getNote(noteId);
     const existing = note.attributes.filter(
       (a) => a.type === "label" && a.name === labelName
     );
     if (existing.length > 0) {
-      // Delete all occurrences so no stale lifecycle labels survive
-      await Promise.all(existing.map((a) => this.deleteAttribute(a.attributeId)));
+      const [primary, ...duplicates] = existing;
+      // PATCH the primary in-place so isInheritable and position are preserved
+      const updated = await this.updateAttribute(primary.attributeId, { value: newValue });
+      // Remove any surplus labels only after the update succeeds
+      await Promise.all(duplicates.map((a) => this.deleteAttribute(a.attributeId)));
+      return updated;
     }
     return this.addLabel(noteId, labelName, newValue);
   }
