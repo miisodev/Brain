@@ -75,7 +75,7 @@ Merge in the contents of `claude_desktop_config.example.json`, replacing the pat
 ```json
 {
   "mcpServers": {
-    "Trilium Brain": {
+    "Brain": {
       "command": "bun",
       "args": ["run", "/absolute/path/to/Trilium/dist/index.js"],
       "env": {
