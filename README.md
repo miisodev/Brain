@@ -4,8 +4,13 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 
 **60 tools** across 9 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
 
-> If this project is useful to you, consider supporting its development:
-> **[paypal.me/miisodev](https://paypal.me/miisodev?locale.x=en_US&country.x=ZA)**
+<div align="center">
+
+### If Trilium Brain is useful to you, consider supporting its development
+
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-009cde?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/miisodev?locale.x=en_US&country.x=ZA)
+
+</div>
 
 ---
 
