@@ -691,18 +691,17 @@ export class TriliumClient {
     return label ? parseInt(label.value, 10) || 0 : 0;
   }
 
-  // Discover all distinct relation type names used across a subtree
+  // Discover all distinct relation type names used across a subtree.
+  // Searches for notes with our #noteType label (structured engrams) to keep
+  // the scan bounded and relevant — structural scaffold notes are excluded.
   async listSynapseTypes(ancestorNoteId?: string): Promise<string[]> {
-    const query = ancestorNoteId
-      ? `note.isDecendantOfNote() AND note.relations != ""` // broad search
-      : `note.ownedRelations != ""`;
-
     const types = new Set<string>();
     try {
-      const res = await this.searchNotes(
-        ancestorNoteId ? `note` : `note`,
-        { ancestorNoteId, limit: 500, fastSearch: true }
-      );
+      const res = await this.searchNotes("#noteType", {
+        ancestorNoteId,
+        limit: 500,
+        fastSearch: true,
+      });
       for (const n of res.results) {
         try {
           const full = await this.getNote(n.noteId);

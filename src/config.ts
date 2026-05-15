@@ -35,9 +35,7 @@ export const EMPTY_BRAIN: BrainConfig = {
 // ── File path ─────────────────────────────────────────────────────────────────
 
 export function configFilePath(): string {
-  if (process.env.BRAIN_CONFIG_PATH) return process.env.BRAIN_CONFIG_PATH;
-  // Bun.main is the path of the running script — resolves correctly for both
-  // `bun run src/index.ts` (dev) and `bun dist/index.js` (prod)
+  // Always co-located with the running bundle — no env override
   return join(dirname(Bun.main), "brain.json");
 }
 

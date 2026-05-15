@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { TriliumClient } from "./trilium.js";
 import { registerTools } from "./tools.js";
-import { loadConfig, discoverBrain, saveConfig, EMPTY_BRAIN } from "./config.js";
+import { loadConfig, discoverBrain, saveConfig, configFilePath, EMPTY_BRAIN } from "./config.js";
 
 const baseUrl = process.env.TRILIUM_BASE_URL;
 const token   = process.env.TRILIUM_ETAPI_TOKEN;
@@ -20,14 +20,14 @@ const trilium = new TriliumClient(baseUrl, token);
 let brain = loadConfig();
 
 if (!brain) {
-  console.error("[brain] No brain.json found — attempting auto-discovery...");
+  console.error("[brain] No brain.json — attempting auto-discovery from Trilium...");
   try {
     brain = await discoverBrain(trilium);
     if (brain) {
-      const saved = saveConfig(brain);
-      console.error(`[brain] Auto-discovered and saved config to: ${saved}`);
+      saveConfig(brain);
+      console.error(`[brain] Auto-discovered. Config written to: ${configFilePath()}`);
     } else {
-      console.error("[brain] Brain structure not found in Trilium. Run the bootstrap_brain tool to initialize.");
+      console.error("[brain] Brain not found in Trilium. Run the bootstrap_brain tool to initialize.");
     }
   } catch (err) {
     console.error(`[brain] Auto-discovery failed: ${err}`);

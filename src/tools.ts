@@ -32,7 +32,6 @@ import {
   projectContent,
   opinionContent,
   domainContent,
-  sessionContent,
 } from "./templates.js";
 
 // ── Output shape helpers ───────────────────────────────────────────────────────
@@ -120,18 +119,32 @@ Returns: { id, title, noteType, children[] } — three levels deep.`,
           };
         })
       );
+      // Surface any uninitialized structural IDs so the LLM knows to bootstrap
+      const cfg = b();
+      const uninitializedNodes: string[] = [];
+      const checkFlat = (obj: Record<string, unknown>, prefix: string) => {
+        for (const [k, v] of Object.entries(obj)) {
+          if (typeof v === "string" && !v) uninitializedNodes.push(`${prefix}.${k}`);
+          else if (typeof v === "object" && v) checkFlat(v as Record<string, unknown>, `${prefix}.${k}`);
+        }
+      };
+      checkFlat(cfg as unknown as Record<string, unknown>, "brain");
+
       return txt({
         id: root.noteId,
         title: root.title,
         children,
         structuralIds: {
-          identity: b().identity,
-          workingMemory: b().workingMemory,
-          knowledge: b().knowledge,
-          opinions: b().opinions,
-          log: b().log,
-          templates: b().templates,
+          identity: cfg.identity,
+          workingMemory: cfg.workingMemory,
+          knowledge: cfg.knowledge,
+          opinions: cfg.opinions,
+          log: cfg.log,
+          templates: cfg.templates,
         },
+        configStatus: uninitializedNodes.length === 0
+          ? "complete"
+          : { incomplete: true, uninitializedNodes },
       });
     }
   );
@@ -201,7 +214,8 @@ Returns id+title+type stubs only — call decode_engram or read_engram for conte
     },
     async ({ query, ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection, fastSearch, includeArchived }) => {
       const result = await trilium.searchNotes(query, {
-        ancestorNoteId, ancestorDepth, limit, orderBy, orderDirection,
+        ancestorNoteId: ancestorNoteId ?? b().root,
+        ancestorDepth, limit, orderBy, orderDirection,
         fastSearch, includeArchivedNotes: includeArchived,
       });
       return txt(result.results.map(noteStub));
@@ -210,19 +224,21 @@ Returns id+title+type stubs only — call decode_engram or read_engram for conte
 
   server.tool(
     "trace_signal",
-    `Find engrams by label name and optional exact value.
+    `Find engrams by label name and optional exact value. Scoped to the brain by default.
 Shorthand for scan_engrams with #label syntax. Use for structured retrieval.
 Examples: labelName="noteType" labelValue="decision" → all decision records.`,
     {
       labelName: z.string().describe("Label name (no # prefix)"),
       labelValue: z.string().optional().describe("Exact value to match"),
-      ancestorNoteId: z.string().optional().describe("Scope to subtree"),
+      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: brain root)"),
       limit: z.number().optional().describe("Max results (default: 50)"),
     },
     async ({ labelName, labelValue, ancestorNoteId, limit }) => {
       const query = labelValue != null ? `#${labelName}=${labelValue}` : `#${labelName}`;
       const result = await trilium.searchNotes(query, {
-        ancestorNoteId, limit: limit ?? 50, fastSearch: true,
+        ancestorNoteId: ancestorNoteId ?? b().root,
+        limit: limit ?? 50,
+        fastSearch: true,
       });
       return txt(result.results.map(noteStub));
     }
@@ -230,14 +246,14 @@ Examples: labelName="noteType" labelValue="decision" → all decision records.`,
 
   server.tool(
     "pulse_recent",
-    `Return the most recently modified engrams (up to 50), newest-first.
+    `Return the most recently modified engrams (up to 50), newest-first. Scoped to the brain by default.
 Use to resume context after a gap: "what changed since last session?"
-Returns id+title+date triples. Optionally scoped to a subtree.`,
+Returns id+title+date triples.`,
     {
-      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: entire brain)"),
+      ancestorNoteId: z.string().optional().describe("Scope to subtree (default: brain root)"),
     },
     async ({ ancestorNoteId }) => {
-      const changes = await trilium.getNoteHistory(ancestorNoteId);
+      const changes = await trilium.getNoteHistory(ancestorNoteId ?? b().root);
       const seen = new Set<string>();
       const deduped = changes
         .filter((c) => {
@@ -334,7 +350,7 @@ Returns the new noteId and branchId.`,
     "rewrite_engram",
     `Replace the full content of an existing engram.
 For text notes use HTML; for code notes use plain text.
-Trilium auto-saves a revision before overwrite when content changed.`,
+Does NOT guarantee a pre-write snapshot — call snapshot_engram first if you need one.`,
     {
       noteId: z.string().describe("Note ID"),
       content: z.string().describe("New full content"),
@@ -346,13 +362,14 @@ Trilium auto-saves a revision before overwrite when content changed.`,
   );
 
   server.tool(
-    "retitle_engram",
-    `Update engram metadata: title, type, or mime. Does not touch content.
-Use to rename, reclassify type, or fix MIME after creation.`,
+    "morph_engram",
+    `Mutate engram metadata: title, type, or mime. Does not touch content.
+Use to rename, reclassify type, or fix MIME after creation.
+Morphing type (e.g. text → code) changes how Trilium renders the note.`,
     {
       noteId: z.string().describe("Note ID"),
       title: z.string().optional().describe("New title"),
-      type: z.string().optional().describe("New note type"),
+      type: z.string().optional().describe("New note type (text, code, book, canvas, mermaid…)"),
       mime: z.string().optional().describe("New MIME type"),
     },
     async ({ noteId, title, type, mime }) => {
@@ -477,7 +494,7 @@ Returns the created attribute stub.`,
     "desynapse",
     `Remove a specific named synapse between two engrams.
 Requires the relation name and both note IDs — more ergonomic than erase_attribute.
-Use erase_attribute if you only have the attributeId.`,
+Use prune_attribute if you only have the attributeId.`,
     {
       fromNoteId: z.string().describe("Source engram ID"),
       synapseType: z.string().describe("Relation name to remove"),
@@ -490,14 +507,14 @@ Use erase_attribute if you only have the attributeId.`,
   );
 
   server.tool(
-    "erase_attribute",
-    `Delete any label or relation attribute by its raw attributeId.
+    "prune_attribute",
+    `Delete any label or relation attribute by its raw attributeId (synaptic pruning).
 Get the attributeId from retrieve_engram's attributes array.
 For removing a named relation, desynapse is more ergonomic.`,
-    { attributeId: z.string().describe("Attribute ID to erase") },
+    { attributeId: z.string().describe("Attribute ID to prune") },
     async ({ attributeId }) => {
       await trilium.deleteAttribute(attributeId);
-      return txt({ ok: true, erased: attributeId });
+      return txt({ ok: true, pruned: attributeId });
     }
   );
 
@@ -561,11 +578,16 @@ Returns id+title pairs with the relation name.`,
     async ({ noteId }) => {
       const note = await trilium.getNote(noteId);
       const rels = note.attributes.filter((a) => a.type === "relation" && !a.name.startsWith("sw_"));
+      // Build weight map from sw_{type}_{targetId} labels already on this note — no extra API calls
+      const weightMap: Record<string, number> = {};
+      note.attributes
+        .filter((a) => a.type === "label" && a.name.startsWith("sw_"))
+        .forEach((a) => { weightMap[a.name] = parseInt(a.value) || 0; });
       const linked = await Promise.all(
         rels.map(async (r) => {
           try {
             const n = await trilium.getNote(r.value);
-            return { id: n.noteId, title: n.title, via: r.name };
+            return { id: n.noteId, title: n.title, via: r.name, weight: weightMap[`sw_${r.name}_${r.value}`] ?? 0 };
           } catch {
             return null;
           }
@@ -610,7 +632,7 @@ Useful for: "how is concept A connected to concept B?"`,
     "expand_neighborhood",
     `Return all engrams reachable from a starting note within N relation hops.
 Builds a local subgraph — useful for understanding the context around an engram.
-Optionally filter by a specific synapse type.
+The center node itself is included at depth=0. Optionally filter by a specific synapse type.
 Returns nodes with depth and the relation that led to them.`,
     {
       noteId: z.string().describe("Starting engram ID"),
@@ -677,6 +699,7 @@ Automatically adds: #noteType=thread  #status=active  #dateOpened`,
         trilium.addLabel(nid, "status", "active"),
         trilium.addLabel(nid, "dateOpened", d),
         ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+        ...(b().templates.thread ? [trilium.addRelation(nid, "template", b().templates.thread)] : []),
       ]);
       return txt({ noteId: nid, title, status: "active", parentId });
     }
@@ -705,6 +728,7 @@ Automatically adds: #noteType=decision  #status=pending  #dateOpened`,
         trilium.addLabel(nid, "status", "pending"),
         trilium.addLabel(nid, "dateOpened", d),
         ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+        ...(b().templates.decision ? [trilium.addRelation(nid, "template", b().templates.decision)] : []),
       ]);
       return txt({ noteId: nid, title, status: "pending", parentId });
     }
@@ -724,17 +748,23 @@ Automatically adds: #noteType=concept  #domain={domain}`,
       topic: z.string().optional().describe("Topic label for finer grouping"),
     },
     async ({ title, domain, domainNoteId, topic }) => {
-      // Locate or fall back to knowledge root
+      // Locate the domain's Concepts/ subfolder, or fall back to domain root, then knowledge root
       let parentId = domainNoteId;
       if (!parentId) {
-        // Try to find an existing domain note by label
         try {
           const res = await trilium.searchNotes(`#noteType=domain #domain=${domain}`, {
             ancestorNoteId: b().knowledge.root,
             fastSearch: true,
             limit: 1,
           });
-          parentId = res.results[0]?.noteId;
+          if (res.results[0]) {
+            const domainNote = await trilium.getNote(res.results[0].noteId);
+            const children = await Promise.all(
+              domainNote.childNoteIds.map((cid) => trilium.getNote(cid).catch(() => null))
+            );
+            const conceptsFolder = children.find((c) => c?.title === "Concepts");
+            parentId = conceptsFolder?.noteId ?? res.results[0].noteId;
+          }
         } catch {
           // Fall back to knowledge root
         }
@@ -747,6 +777,7 @@ Automatically adds: #noteType=concept  #domain={domain}`,
         trilium.addLabel(nid, "noteType", "concept"),
         trilium.addLabel(nid, "domain", domain),
         ...(topic ? [trilium.addLabel(nid, "topic", topic)] : []),
+        ...(b().templates.concept ? [trilium.addRelation(nid, "template", b().templates.concept)] : []),
       ]);
       return txt({ noteId: nid, title, domain, parentId });
     }
@@ -807,6 +838,7 @@ Automatically adds: #noteType=opinion  #mood={mood}  #dateWritten`,
         trilium.addLabel(nid, "mood", mood ?? "contemplative"),
         trilium.addLabel(nid, "dateWritten", d),
         ...(topics ?? []).map((t) => trilium.addLabel(nid, "topic", t)),
+        ...(b().templates.opinion ? [trilium.addRelation(nid, "template", b().templates.opinion)] : []),
       ]);
       return txt({ noteId: nid, title, mood: mood ?? "contemplative", date: d });
     }
@@ -835,6 +867,7 @@ Automatically adds: #noteType=project  #status=active  #dateStarted`,
         trilium.addLabel(pid, "dateStarted", d),
         ...(topic ? [trilium.addLabel(pid, "topic", topic)] : []),
         ...(goal ? [trilium.addLabel(pid, "goal", goal)] : []),
+        ...(b().templates.projectBrief ? [trilium.addRelation(pid, "template", b().templates.projectBrief)] : []),
       ]);
 
       const [decisions, notes] = await Promise.all([
@@ -948,19 +981,18 @@ Use to correct, expand, or supersede stored knowledge rather than creating dupli
   server.tool(
     "weave_thread",
     `Manage reasoning threads in Working Memory → Threads.
-  • open  — create a thread (use spawn_thread for full format)
   • append — add a timestamped log entry to an existing thread
   • close — mark resolved + append resolution summary
-  • list  — return all active threads`,
+  • list  — return all active threads
+Use spawn_thread to create a new thread with proper formatting.`,
     {
-      action: z.enum(["open","append","close","list"]).describe("Thread action"),
-      title: z.string().optional().describe("Thread title (for open)"),
+      action: z.enum(["append","close","list"]).describe("Thread action"),
       noteId: z.string().optional().describe("Thread note ID (for append / close)"),
       entry: z.string().optional().describe("Log entry text (for append)"),
       resolution: z.string().optional().describe("Resolution summary (for close)"),
       date: z.string().optional().describe("ISO date (default: today)"),
     },
-    async ({ action, title, noteId, entry, resolution, date }) => {
+    async ({ action, noteId, entry, resolution, date }) => {
       const d = date ?? today();
 
       if (action === "list") {
@@ -969,20 +1001,6 @@ Use to correct, expand, or supersede stored knowledge rather than creating dupli
           fastSearch: true,
         });
         return txt(result.results.map(noteStub));
-      }
-
-      if (action === "open") {
-        if (!title) throw new Error("title required to open a thread");
-        const result = await trilium.createNote(
-          b().workingMemory.threads || b().workingMemory.root,
-          title,
-          threadContent("", d)
-        );
-        const nid = result.note.noteId;
-        await trilium.addLabel(nid, "noteType", "thread");
-        await trilium.addLabel(nid, "status", "active");
-        await trilium.addLabel(nid, "dateOpened", d);
-        return txt({ noteId: nid, title, action: "opened" });
       }
 
       if (action === "append") {
@@ -1016,10 +1034,68 @@ Use to correct, expand, or supersede stored knowledge rather than creating dupli
   );
 
   server.tool(
+    "triage_inbox",
+    `Process items from Working Memory → Inbox.
+  • list    — return all items currently in the inbox
+  • promote — move an item to a proper brain section (threads, knowledge, opinions, or a specific note)
+  • discard — permanently dissolve an inbox item
+
+Use get_inbox_pulse to find today's Trilium inbox note, or use the static inbox from Working Memory.`,
+    {
+      action: z.enum(["list","promote","discard"]).describe("Triage action"),
+      noteId: z.string().optional().describe("Inbox item note ID (required for promote / discard)"),
+      targetSection: z.enum(["workingMemory","knowledge","opinions"]).optional().describe("Destination section (for promote; workingMemory → Threads)"),
+      targetNoteId: z.string().optional().describe("Explicit destination note ID (overrides targetSection)"),
+    },
+    async ({ action, noteId, targetSection, targetNoteId }) => {
+      const inboxId = b().workingMemory.inbox || b().workingMemory.root;
+
+      if (action === "list") {
+        const inbox = await trilium.getNote(inboxId);
+        const items = await Promise.all(
+          inbox.childNoteIds.map((cid) => trilium.getNote(cid).catch(() => null))
+        );
+        return txt(items.filter(Boolean).map((n) => noteStub(n!)));
+      }
+
+      if (!noteId) throw new Error("noteId required for promote/discard");
+
+      if (action === "discard") {
+        await trilium.deleteNote(noteId);
+        return txt({ ok: true, discarded: noteId });
+      }
+
+      if (action === "promote") {
+        const sectionMap: Record<string, string> = {
+          workingMemory: b().workingMemory.threads || b().workingMemory.root,
+          knowledge:     b().knowledge.root,
+          opinions:      b().opinions,
+        };
+        const destId = targetNoteId ?? (targetSection ? sectionMap[targetSection] : b().workingMemory.root);
+        const newBranch = await trilium.cloneNote(noteId, destId);
+        // Remove old inbox branch
+        const fresh = await trilium.getNote(noteId);
+        for (const bid of fresh.parentBranchIds) {
+          if (bid === newBranch.branchId) continue;
+          const branch = await trilium.getBranch(bid).catch(() => null);
+          if (branch?.parentNoteId === inboxId) {
+            await trilium.deleteBranch(bid);
+            break;
+          }
+        }
+        await trilium.addLabel(noteId, "status", "triaged");
+        return txt({ ok: true, noteId, movedTo: destId, newBranchId: newBranch.branchId });
+      }
+
+      throw new Error(`Unknown action: ${action}`);
+    }
+  );
+
+  server.tool(
     "consolidate",
     `Promote a Working Memory engram (thread or decision) into durable Knowledge.
 Creates a properly labelled Knowledge engram from the working memory note,
-links them via ~sourceOf relation, and optionally closes the original thread.
+links them via ~derivedFrom relation (knowledge ← thread), and optionally closes the original thread.
 
 Use when a thread has yielded reusable knowledge worth preserving.`,
     {
@@ -1059,7 +1135,7 @@ Use when a thread has yielded reusable knowledge worth preserving.`,
         trilium.addLabel(nid, "dateConsolidated", today()),
         ...(domain ? [trilium.addLabel(nid, "domain", domain)] : []),
         ...(topicLabel ? [trilium.addLabel(nid, "topic", topicLabel.value)] : []),
-        trilium.addRelation(nid, "sourceOf", sourceNoteId),
+        trilium.addRelation(nid, "derivedFrom", sourceNoteId),
       ]);
 
       if (closeSource !== false) {
@@ -1085,7 +1161,7 @@ Searches within ancestorNoteId scope (default: knowledge root).`,
     },
     async ({ ancestorNoteId, limit }) => {
       const scopeId = ancestorNoteId ?? b().knowledge.root;
-      const result = await trilium.searchNotes("note", { ancestorNoteId: scopeId, limit: 200 });
+      const result = await trilium.searchNotes("#noteType", { ancestorNoteId: scopeId, limit: 200, fastSearch: true });
 
       const orphans: Array<{ id: string; title: string; type?: string }> = [];
       for (const n of result.results) {
