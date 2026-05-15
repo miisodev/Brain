@@ -41,7 +41,7 @@ const brainRef = { config: brain ?? EMPTY_BRAIN };
 // ── Server ────────────────────────────────────────────────────────────────────
 
 const server = new McpServer({
-  name: "Trilium Brain",
+  name: "Brain",
   version: "3.0.0",
 });
 

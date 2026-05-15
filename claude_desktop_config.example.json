@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "Trilium Brain": {
+    "Brain": {
       "command": "bun",
       "args": [
         "run",

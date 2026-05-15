@@ -75,7 +75,7 @@ Merge in the contents of `claude_desktop_config.example.json`, replacing the pat
 ```json
 {
   "mcpServers": {
-    "Trilium Brain": {
+    "Brain": {
       "command": "bun",
       "args": ["run", "/absolute/path/to/Trilium/dist/index.js"],
       "env": {
@@ -90,6 +90,60 @@ Merge in the contents of `claude_desktop_config.example.json`, replacing the pat
 ### 4. Restart Claude Desktop
 
 Close and reopen. The Trilium Brain tools will appear in the MCP tools list.
+
+---
+
+## Cloud / Remote Setup
+
+Use this when your Trilium instance is not on the same machine as the MCP server — for example, when using Claude Code on the web or when Trilium is hosted on a VPS.
+
+### 1. Expose Trilium over HTTPS
+
+Trilium's built-in server listens on HTTP. Put it behind a reverse proxy for a public endpoint.
+
+**Caddy** (automatic HTTPS):
+```caddyfile
+trilium.yourdomain.com {
+    reverse_proxy localhost:8080
+}
+```
+
+**nginx**:
+```nginx
+server {
+    listen 443 ssl;
+    server_name trilium.yourdomain.com;
+    # ... TLS cert config ...
+    location / {
+        proxy_pass         http://localhost:8080;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+    }
+}
+```
+
+Or use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for a zero-config public endpoint with no open ports.
+
+### 2. Point the MCP server at the remote URL
+
+```env
+TRILIUM_BASE_URL=https://trilium.yourdomain.com
+TRILIUM_ETAPI_TOKEN=your-etapi-token-here
+```
+
+### 3. Self-signed certificates (optional)
+
+If your proxy uses a self-signed cert, set this in your environment before starting the server:
+
+```env
+NODE_TLS_REJECT_UNAUTHORIZED=0
+```
+
+> **Warning:** Only use this on trusted private networks or for local development. Never disable TLS verification in a public-facing deployment.
+
+### Claude Code (web)
+
+When running as an MCP server in Claude Code on the web, add `TRILIUM_BASE_URL` and `TRILIUM_ETAPI_TOKEN` to your environment in the project settings — no local config file or desktop app is needed.
 
 ---
 
