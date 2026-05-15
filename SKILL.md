@@ -11,7 +11,7 @@ Persistent memory that survives across sessions. Treat it as your own mind: read
 
 ## Architecture — Canonical Brain Tree
 
-Discovered at session start via `start_brain_session`, which returns all structural IDs. IDs vary per installation — always use IDs returned by `start_brain_session`, never hardcode them.
+Discovered at session start via `start_session`, which returns all structural IDs. IDs vary per installation — always use IDs returned by `start_session`, never hardcode them.
 
 ```
 Trilium Brain
@@ -40,7 +40,7 @@ Trilium Brain
     ├── Thread · Decision · Concept · Project Brief · Person · Opinion · Domain
 ```
 
-**IDs to capture from `start_brain_session` and use throughout the session:**
+**IDs to capture from `start_session` and use throughout the session:**
 - Brain root, Identity root, Working Memory root → Inbox, Threads, Decisions, Open Questions IDs
 - Knowledge root → People, Organizations, Projects IDs
 - Opinions ID, Log root → Sessions, Decisions Made IDs
@@ -61,7 +61,7 @@ Trilium Brain
 
 ### START — run in this exact order before responding
 
-1. `start_brain_session` — once, first thing. Returns full tree + structural IDs. Capture all IDs. Never call again mid-session.
+1. `start_session` — once, first thing. Returns full tree + structural IDs. Capture all IDs. Never call again mid-session.
 2. `recall_memory(query)` on the topic of the first message — always, before responding.
 3. `manage_thread(action="list")` — check open threads.
 
@@ -117,10 +117,12 @@ All `create_*` and `store_memory` tools auto-apply base labels. Add domain label
 | `#dateUpdated` | ISO date | Last modification (set every time you `update_memory`) |
 | `#iconClass` | BoxIcons class string | UI icon — carry over from existing notes, don't invent |
 
-### Synaptic weight labels (managed by strengthen_relation)
+### Synaptic weight labels (managed by strengthen_relation / weaken_relation)
 
 `#sw_{relationName}_{targetNoteId} = <integer>` — Hebbian reinforcement counter.  
-Call `strengthen_relation` whenever you traverse a path you want to make more salient.
+Call `strengthen_relation` whenever you traverse a path you want to make more salient.  
+Call `weaken_relation` when a path proved misleading, outdated, or incorrectly wired.  
+The label is removed automatically when weight reaches zero — the relation itself is preserved.
 
 ---
 
@@ -176,6 +178,76 @@ Wire immediately after creating or updating. Use the most specific type availabl
 
 **Opinions:**
 - Opinion → `supports` → notes that informed it (optional, when clear)
+
+---
+
+## Search Query Syntax
+
+`search_notes` accepts Trilium's full query language. Use `debug=true` if a query returns unexpected results — it surfaces parsing errors.
+
+```
+# Label presence / value
+#noteType                       → has label noteType (any value)
+#noteType=concept               → exact value match
+#domain="Machine Learning"      → quote values that contain spaces
+
+# Text search
+machine learning                → full-text across title + content
+note.title =* "brain"           → title contains "brain" (case-insensitive)
+note.title = "Exact Title"      → exact title match
+
+# Subtree scope (always add for performance)
+ancestorNoteId=<id>             → constrain to a subtree (param, not query syntax)
+
+# Boolean
+#noteType=concept AND #domain=Technology
+#status=active OR #status=pending
+NOT #archived
+
+# Date operators
+note.dateModified >= MONTH-1    → modified in the last month
+note.dateCreated >= TODAY-7     → created in the last 7 days
+
+# Attribute operators
+note.ownedAttributes.type = "relation" AND note.ownedAttributes.name = "supports"
+```
+
+**Quick picks:**
+- Finding a note by rough title → `search_notes("note.title =* \\"keyword\\"")`
+- Structured retrieval by label → `search_notes_by_label("noteType", "concept")`
+- Recent activity → `get_recent_notes()` (no query needed)
+
+---
+
+## Graph Intelligence
+
+The knowledge graph is only valuable if it's maintained. Apply these rules on every traversal.
+
+### When to strengthen a relation
+Call `strengthen_relation` after any traversal where the path was **useful**:
+- You followed a relation to recall context that proved directly relevant
+- A `find_relation_path` result surfaced a non-obvious connection the user acted on
+- A `get_note_neighborhood` cluster revealed conceptually meaningful grouping
+
+### When to weaken a relation
+Call `weaken_relation` when a path was **misleading or stale**:
+- A relation exists but the connected note is no longer relevant to the source
+- A `suggest_connections` result was explicitly rejected
+- A concept was refactored and the old connection no longer accurately represents the relationship
+
+**Never** delete a relation solely because its weight is low — weight reflects traversal frequency, not correctness. Use `delete_relation` only when the relationship itself is wrong.
+
+### Graph traversal decision tree
+
+```
+Need a specific note ID?                → recall_memory / search_notes
+Know a note, want what it connects to?  → get_outgoing_relations
+Know a note, want what points to it?    → get_incoming_relations
+How are two notes connected?            → find_relation_path
+What else is near this concept?         → get_note_neighborhood (depth=1–2)
+Full graph export for analysis?         → traverse_graph
+What relation types exist?              → get_relation_types
+```
 
 ---
 
@@ -276,12 +348,27 @@ Duplicates found: read both, merge into the more complete, `delete_note` the red
 
 ---
 
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `start_session` returns `configStatus.incomplete` | Run `bootstrap_brain` to create missing structure and re-write brain.json |
+| `search_notes` returns unexpected empty results | Add `debug=true` — check for query syntax errors in the response |
+| `create_concept` places under wrong parent | Provide `domainNoteId` explicitly; if unknown, call `search_notes_by_label("noteType","domain")` first |
+| `manage_thread(action="close")` fails | Verify the note has `#noteType=thread`; close requires this label |
+| `promote_to_knowledge` creates a second domain folder | Pass `domainNoteId` from `create_domain` or discovery; don't rely on name-matching alone |
+| `strengthen_relation` / `weaken_relation` say "no relation found" | The relation doesn't exist yet — call `add_relation` first, then manage weight |
+| `triage_inbox(action="promote")` leaves original in inbox | The tool clones then deletes all source branches; if it fails mid-way, check for orphaned clone with `get_recent_notes` |
+| Tool returns stale IDs after re-bootstrap | Call `get_brain_config` — if IDs don't match, `bootstrap_brain` again to refresh brain.json |
+
+---
+
 ## Tool Reference
 
 ### Session / Orientation
 | Tool | Signature | Use |
 |------|-----------|-----|
-| `start_brain_session` | `()` | Boot session. Returns 3-level tree + all structural IDs. Once per session. |
+| `start_session` | `()` | Boot session. Returns 3-level tree + all structural IDs. Once per session. |
 | `log_session` | `(summary, title?, decisions?, modified?, openQuestions?, date?)` | Persist session to Log → Sessions. |
 | `get_brain_config` | `()` | Return current brain config (all IDs) without API calls. |
 
@@ -318,6 +405,7 @@ Duplicates found: read both, merge into the more complete, `delete_note` the red
 | `delete_relation` | `(fromNoteId, relationName, toNoteId)` | Remove named relation by endpoint pair. |
 | `delete_attribute` | `(attributeId)` | Remove any attribute by raw attributeId. |
 | `strengthen_relation` | `(fromNoteId, relationName, toNoteId)` | Increment Hebbian weight (+1 per call). |
+| `weaken_relation` | `(fromNoteId, relationName, toNoteId, by?)` | Decrement Hebbian weight. Removes label at zero. Relation preserved. |
 | `get_relation_types` | `(ancestorNoteId?)` | Discover all relation type names in use. |
 | `get_related_notes` | `(noteId, relationName, direction?)` | Notes connected via a specific relation type. |
 

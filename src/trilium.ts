@@ -689,6 +689,36 @@ export class TriliumClient {
     return { strength: 1, labelId: created.attributeId };
   }
 
+  // Decrement the synaptic weight for a relation (counter-Hebbian weakening)
+  async weakenSynapse(
+    fromNoteId: string,
+    relationName: string,
+    toNoteId: string,
+    by = 1
+  ): Promise<{ strength: number; labelId: string | null }> {
+    const note = await this.getNote(fromNoteId);
+    const relation = note.attributes.find(
+      (a) => a.type === "relation" && a.name === relationName && a.value === toNoteId
+    );
+    if (!relation) {
+      throw new Error(`No '${relationName}' relation found from ${fromNoteId} to ${toNoteId}.`);
+    }
+    const labelName = `sw_${relationName}_${toNoteId}`;
+    const existing = note.attributes.find(
+      (a) => a.type === "label" && a.name === labelName
+    );
+    if (!existing) {
+      return { strength: 0, labelId: null };
+    }
+    const newStrength = Math.max(0, (parseInt(existing.value, 10) || 0) - by);
+    if (newStrength === 0) {
+      await this.deleteAttribute(existing.attributeId);
+      return { strength: 0, labelId: null };
+    }
+    const updated = await this.updateAttribute(existing.attributeId, { value: String(newStrength) });
+    return { strength: newStrength, labelId: updated.attributeId };
+  }
+
   // Get the strength of a specific relation
   async getSynapseStrength(fromNoteId: string, relationName: string, toNoteId: string): Promise<number> {
     const note = await this.getNote(fromNoteId);

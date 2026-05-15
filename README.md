@@ -2,7 +2,7 @@
 
 An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://github.com/TriliumNext/Notes) into a persistent, graph-structured second brain for Claude and other LLM clients.
 
-**59 tools** across 9 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
+**60 tools** across 9 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
 
 > If this project is useful to you, consider supporting its development:
 > **[paypal.me/miisodev](https://paypal.me/miisodev?locale.x=en_US&country.x=ZA)**
@@ -12,7 +12,7 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 ## Features
 
 - **Neural architecture** — engrams (notes), synapses (typed relations), synaptic weights (Hebbian reinforcement), connectome traversal
-- **59 tools** covering the full Trilium ETAPI surface plus high-level memory operations
+- **60 tools** covering the full Trilium ETAPI surface plus high-level memory operations
 - **Zero ID pasting** — `bootstrap_brain` creates the full tree and writes `brain.json` automatically; auto-discovery rebuilds config if the file is missing
 - **Structured spawning** — `spawn_*` tools create properly formatted, labelled notes with `~template` relations wired automatically
 - **Knowledge graph** — BFS path-finding, neighbourhood expansion, full connectome traversal with direction and depth controls
@@ -192,8 +192,8 @@ root
 ### Session / Orientation
 | Tool | Description |
 |------|-------------|
-| `start_brain_session` | Boot session — returns three-level brain tree with all structural IDs. Call once per session. |
-| `log_session` | Persist structured session summary into Log → Sessions. |
+| `start_session` | Boot session — returns three-level brain tree with all structural IDs. Call once per session, never again mid-session. |
+| `log_session` | Persist structured session summary into Log → Sessions. Call at end of every session. |
 | `get_brain_config` | Return the live brain.json config (all structural note IDs). |
 
 ### Search
@@ -228,7 +228,8 @@ root
 | `add_relation` | Create a typed directional relation between two notes. |
 | `delete_relation` | Remove a named relation by source + type + target. |
 | `delete_attribute` | Delete any attribute by raw attributeId. |
-| `strengthen_relation` | Increment synaptic weight (Hebbian reinforcement). |
+| `strengthen_relation` | Increment synaptic weight (+1). Call after traversing a path that proved useful. |
+| `weaken_relation` | Decrement synaptic weight (floors at 0, label removed). Call when a path was misleading or stale. |
 | `get_relation_types` | Discover all relation type names in use across the brain. |
 | `get_related_notes` | Find all notes connected via a specific relation type. |
 

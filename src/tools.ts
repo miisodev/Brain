@@ -82,7 +82,7 @@ export function registerTools(server: McpServer, trilium: TriliumClient, brainRe
   // ════════════════════════════════════════════════════════════════════════════
 
   server.tool(
-    "start_brain_session",
+    "start_session",
     `Boot the Trilium Brain session. Returns the full three-level brain tree with note IDs
 for every structural node so the model can navigate without further round-trips.
 Call ONCE at the start of every session. Never repeat mid-session.
@@ -539,6 +539,24 @@ Returns the updated strength value and label ID.`,
     },
     async ({ fromNoteId, relationName, toNoteId }) => {
       const result = await trilium.strengthenSynapse(fromNoteId, relationName, toNoteId);
+      return txt({ fromNoteId, relationName, toNoteId, ...result });
+    }
+  );
+
+  server.tool(
+    "weaken_relation",
+    `Decrement the synaptic weight between two notes (counter-Hebbian weakening).
+Each call subtracts 1 (or a custom amount) from the #sw_{type}_{targetId} label.
+Weight floors at 0 — the label is removed entirely when it reaches zero.
+Returns the updated strength and label ID (null if label was removed).`,
+    {
+      fromNoteId: z.string().describe("Source note ID"),
+      relationName: z.string().describe("Relation name to weaken"),
+      toNoteId: z.string().describe("Target note ID"),
+      by: z.number().int().min(1).optional().describe("Amount to subtract (default: 1)"),
+    },
+    async ({ fromNoteId, relationName, toNoteId, by }) => {
+      const result = await trilium.weakenSynapse(fromNoteId, relationName, toNoteId, by ?? 1);
       return txt({ fromNoteId, relationName, toNoteId, ...result });
     }
   );
