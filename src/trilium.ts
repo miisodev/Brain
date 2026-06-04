@@ -119,6 +119,29 @@ export interface SearchOpts {
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
+import { SynapseTypes } from "./types.js";
+
+// ── Backlink query helpers (pure) ───────────────────────────────────────────
+// Trilium's search DSL has no generic "any relation → X" predicate, and
+// `note.ownedAttributes.value` is NOT a valid search property — it returns HTTP
+// 400, which was the cause of the old silently-empty backlinks. Instead we OR
+// one `~name.noteId` clause per relation name. `~rel.prop` compiles to
+// RelationWhereExp, which matches ALL relations of that name, so multi-valued
+// relations (e.g. several `references`) are handled correctly.
+
+export function buildBacklinkQuery(targetNoteId: string, relationNames: string[]): string {
+  const unique = [...new Set(relationNames)];
+  return unique.map((name) => `~${name}.noteId = "${targetNoteId}"`).join(" OR ");
+}
+
+// Canonical synapse vocabulary ∪ discovered relation names, minus synaptic-weight
+// labels (sw_*) and Trilium's internal ~template relation.
+export function backlinkRelationNames(discovered: string[]): string[] {
+  return [...new Set<string>([...SynapseTypes, ...discovered])].filter(
+    (name) => name !== "template" && !name.startsWith("sw_")
+  );
+}
+
 export class TriliumClient {
   private baseUrl: string;
   private token: string;
@@ -429,28 +452,32 @@ export class TriliumClient {
     return linked.filter((n): n is Note => n !== null);
   }
 
-  // Find notes that have a relation pointing TO this note (reverse traversal)
-  async getBacklinks(noteId: string): Promise<Array<{ noteId: string; title: string; relationName: string }>> {
-    const backlinks: Array<{ noteId: string; title: string; relationName: string }> = [];
+  // Find notes that have a relation pointing TO this note (reverse traversal).
+  // Trilium's search DSL has no generic "any relation → X" predicate, so we OR a
+  // `~name.noteId` clause per known relation name. Callers (e.g. traverseConnectome)
+  // may pass a precomputed `relationNames` set to avoid rediscovering the vocabulary
+  // on every hop; otherwise we discover it once per call.
+  async getBacklinks(
+    noteId: string,
+    relationNames?: string[]
+  ): Promise<Array<{ noteId: string; title: string; relationName: string }>> {
+    const names = relationNames ?? backlinkRelationNames(await this.listSynapseTypes());
+    const query = buildBacklinkQuery(noteId, names);
+    if (!query) return [];
 
-    // Search for notes that own a relation attribute whose value is this noteId.
-    // Uses documented ownedAttributes property filter syntax.
     let results: Note[] = [];
     try {
-      const res = await this.searchNotes(
-        `note.ownedAttributes.type = "relation" && note.ownedAttributes.value = "${noteId}"`,
-        { limit: 200, includeArchivedNotes: true }
-      );
+      const res = await this.searchNotes(query, { limit: 200, includeArchivedNotes: true });
       results = res.results;
     } catch {
-      // Search not supported — return empty
+      // Malformed query or search unavailable — return empty rather than throw.
+      return [];
     }
 
     // Extract relation names directly from search result attributes (avoids N+1 fetches)
+    const backlinks: Array<{ noteId: string; title: string; relationName: string }> = [];
     for (const n of results) {
-      const rels = n.attributes.filter(
-        (a) => a.type === "relation" && a.value === noteId
-      );
+      const rels = n.attributes.filter((a) => a.type === "relation" && a.value === noteId);
       for (const rel of rels) {
         backlinks.push({ noteId: n.noteId, title: n.title, relationName: rel.name });
       }
@@ -579,6 +606,11 @@ export class TriliumClient {
     } = {}
   ): Promise<Array<{ noteId: string; title: string; depth: number; via: string; fromNoteId: string }>> {
     const { maxDepth = 3, relationType, direction = "outbound", maxNodes = 50 } = opts;
+    // Discover the relation-name universe once up front so inbound hops don't each re-scan.
+    const inboundNames =
+      direction === "inbound" || direction === "both"
+        ? backlinkRelationNames(await this.listSynapseTypes())
+        : [];
     const visited = new Map<string, { title: string; depth: number; via: string; fromNoteId: string }>();
     const queue: Array<{ id: string; dist: number; via: string; from: string }> = [
       { id: startId, dist: 0, via: "start", from: "" },
@@ -616,7 +648,7 @@ export class TriliumClient {
 
         if (direction === "inbound" || direction === "both") {
           try {
-            const backlinks = await this.getBacklinks(current.id);
+            const backlinks = await this.getBacklinks(current.id, inboundNames);
             for (const bl of backlinks) {
               if (!relationType || bl.relationName === relationType) {
                 if (!visited.has(bl.noteId)) {
@@ -776,8 +808,8 @@ export class TriliumClient {
       return notes.filter((n): n is { noteId: string; title: string } => n !== null);
     }
 
-    // Inbound: use backlinks and filter by relation name
-    const backlinks = await this.getBacklinks(noteId);
+    // Inbound: query just this relation name, then map to stubs
+    const backlinks = await this.getBacklinks(noteId, [relationName]);
     return backlinks
       .filter((b) => b.relationName === relationName)
       .map((b) => ({ noteId: b.noteId, title: b.title }));

@@ -164,6 +164,18 @@ if (testNoteId) {
   } catch (err) { fail("cloneNote/deleteBranch", err); }
 }
 
+// ── Backlinks (relation reverse traversal) ──────────────────────────────────────
+try {
+  const a = await trilium.createNote(Trilium.knowledge.root, "Backlink Source", "points to target");
+  const b = await trilium.createNote(Trilium.knowledge.root, "Backlink Target", "the target");
+  cleanup.push(a.note.noteId, b.note.noteId);
+  await trilium.addRelation(a.note.noteId, "relatesTo", b.note.noteId);
+  const backlinks = await trilium.getBacklinks(b.note.noteId);
+  const found = backlinks.find((x) => x.noteId === a.note.noteId && x.relationName === "relatesTo");
+  if (found) pass("getBacklinks", `found source via ~relatesTo (${backlinks.length} total)`);
+  else fail("getBacklinks", new Error(`expected source ${a.note.noteId}, got ${JSON.stringify(backlinks)}`));
+} catch (err) { fail("getBacklinks", err); }
+
 // ── History ───────────────────────────────────────────────────────────────────
 try {
   const history = await trilium.getNoteHistory(Trilium.root);
