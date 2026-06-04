@@ -45,7 +45,7 @@ const port      = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
 const authToken = process.env.MCP_AUTH_TOKEN;
 
 function createServer(): McpServer {
-  const s = new McpServer({ name: "Brain", version: "3.0.0" });
+  const s = new McpServer({ name: "Brain", version: "3.5.0" });
   registerTools(s, trilium, brainRef);
   return s;
 }

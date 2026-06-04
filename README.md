@@ -1,4 +1,4 @@
-# Trilium Brain MCP
+# Brain
 
 An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://github.com/TriliumNext/Notes) into a persistent, graph-structured second brain for Claude and other LLM clients.
 
@@ -6,7 +6,7 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 
 <div align="center">
 
-### If Trilium Brain is useful to you, consider supporting its development
+### If Brain is useful to you, consider supporting its development
 
 [![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-009cde?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/miisodev?locale.x=en_US&country.x=ZA)
 
@@ -37,8 +37,8 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 ## Installation
 
 ```bash
-git clone https://github.com/miisodev/Trilium
-cd Trilium
+git clone https://github.com/miisodev/Brain
+cd Brain
 bun install
 bun run build
 ```
@@ -77,7 +77,7 @@ Merge in the contents of `claude_desktop_config.example.json`, replacing the pat
   "mcpServers": {
     "Brain": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/Trilium/dist/index.js"],
+      "args": ["run", "/absolute/path/to/Brain/dist/index.js"],
       "env": {
         "TRILIUM_BASE_URL": "http://localhost:8080",
         "TRILIUM_ETAPI_TOKEN": "your-etapi-token-here"
@@ -89,7 +89,7 @@ Merge in the contents of `claude_desktop_config.example.json`, replacing the pat
 
 ### 4. Restart Claude Desktop
 
-Close and reopen. The Trilium Brain tools will appear in the MCP tools list.
+Close and reopen. The Brain tools will appear in the MCP tools list.
 
 ---
 

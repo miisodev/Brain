@@ -1,9 +1,9 @@
 ---
-name: trilium-brain
+name: brain
 description: "Persistent memory and knowledge graph via Trilium Brain MCP. Activate at the start of every session without exception — governs orientation, recall, capture, session logging, graph wiring, label discipline, and relation hygiene. Trigger immediately on any first user message. Also trigger whenever: memory is referenced, something needs to be remembered or recalled, a decision is confirmed, a question surfaces, an opinion forms, context from a prior session is needed, a project is onboarded, a person or organisation is introduced, or any Trilium operation is requested. Do not improvise memory operations without reading this skill."
 ---
 
-# Trilium Brain — Operational Skill
+# Brain — Operational Skill
 
 Persistent memory that survives across sessions. Treat it as your own mind: read it at session start, write the moment something matters, wire relations immediately, log every session without exception.
 

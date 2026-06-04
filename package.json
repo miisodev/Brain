@@ -1,16 +1,16 @@
 {
-  "name": "trilium-brain",
-  "version": "3.0.0",
+  "name": "brain",
+  "version": "3.5.0",
   "description": "MCP server that turns TriliumNext Notes into a persistent, graph-structured second brain for Claude and other LLM clients.",
   "author": "Kevin Miiso <miisodev@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/miisodev/Trilium.git"
+    "url": "https://github.com/miisodev/Brain.git"
   },
-  "homepage": "https://github.com/miisodev/Trilium#readme",
+  "homepage": "https://github.com/miisodev/Brain#readme",
   "bugs": {
-    "url": "https://github.com/miisodev/Trilium/issues"
+    "url": "https://github.com/miisodev/Brain/issues"
   },
   "keywords": [
     "mcp",
