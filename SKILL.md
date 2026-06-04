@@ -270,8 +270,10 @@ note.dateModified >= TODAY-7       modified in the last 7 days
 note.dateCreated >= MONTH-1        created in the last month
 note.dateCreated >= 2026-01-01     since a fixed date
 
-# Attribute existence
-note.ownedAttributes.type = "relation" AND note.ownedAttributes.name = "supports"
+# Attribute / relation existence
+~supports                          note has a supports relation (any target)
+#confidence                        note has a confidence label (any value)
+~supports.noteId = "abc123"        note's supports relation points to abc123 (backlink form)
 ```
 
 **Quick decision — which search tool to use:**

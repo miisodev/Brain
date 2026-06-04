@@ -147,6 +147,51 @@ When running as an MCP server in Claude Code on the web, add `TRILIUM_BASE_URL` 
 
 ---
 
+## Transport modes: local (stdio) vs remote (HTTP)
+
+Brain runs in one of two transport modes — **never both at once** — selected by the `PORT` environment variable:
+
+| Mode | When to use | Selected by |
+|------|-------------|-------------|
+| **stdio** | Local Claude Desktop / Claude Code spawns Brain as a child process | `PORT` **unset** (default) |
+| **HTTP connector** | Remote clients (Claude on the web, a hosted deployment) reach Brain over the network | `PORT` **set** (Railway sets it for you) |
+
+This is independent of where Trilium runs — either mode talks to a local or remote Trilium via `TRILIUM_BASE_URL`.
+
+### HTTP connector endpoints
+
+When `PORT` is set, Brain serves a streamable-HTTP MCP server instead of stdio:
+
+- `/mcp` — the MCP endpoint (one session per `mcp-session-id` header)
+- `GET /health` — unauthenticated health probe (returns `OK`)
+
+Set `MCP_AUTH_TOKEN` to require `Authorization: Bearer <token>` on `/mcp`. **If it is unset, `/mcp` is unauthenticated — only acceptable on a private network.**
+
+```env
+PORT=8080
+MCP_AUTH_TOKEN=generate-with-openssl-rand-hex-32
+TRILIUM_BASE_URL=https://trilium.yourdomain.com
+TRILIUM_ETAPI_TOKEN=your-etapi-token-here
+```
+
+### Deploy with Docker / Railway
+
+The included [`Dockerfile`](./Dockerfile) builds and runs the HTTP connector:
+
+```bash
+docker build -t trilium-brain .
+docker run -p 8080:8080 \
+  -e PORT=8080 \
+  -e MCP_AUTH_TOKEN=your-secret \
+  -e TRILIUM_BASE_URL=https://trilium.yourdomain.com \
+  -e TRILIUM_ETAPI_TOKEN=your-etapi-token \
+  trilium-brain
+```
+
+On **Railway**, `PORT` is injected automatically — set `MCP_AUTH_TOKEN`, `TRILIUM_BASE_URL`, and `TRILIUM_ETAPI_TOKEN` as service variables and deploy. Point your client at `https://<your-app>.up.railway.app/mcp` with the bearer token (see [`claude_desktop_config.example.json`](./claude_desktop_config.example.json)).
+
+---
+
 ## First-time setup
 
 On a fresh Trilium instance, ask Claude to run:
