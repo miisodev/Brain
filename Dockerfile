@@ -1,4 +1,4 @@
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -9,7 +9,7 @@ COPY src/ ./src/
 
 RUN bun build src/index.ts --outfile dist/index.js --target bun
 
-FROM oven/bun:1.2-alpine
+FROM oven/bun:1-alpine
 WORKDIR /app
 
 COPY --from=builder /app/dist/index.js ./dist/index.js
