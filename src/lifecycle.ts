@@ -432,18 +432,27 @@ export async function sweep(
     report.fixed.push(`merged ${group.length} session notes for ${date} into "${group[0].title}"`);
   }
 
-  // C4 — orphan report (knowledge notes with no relations; report only)
+  // C4 — orphan report (knowledge notes with no relations in either direction;
+  // report only). Incoming edges are derived from the relations visible on the
+  // scanned population — cheap, and exactly the edges that matter here.
   const knowledgeNotes = await trilium.searchNotes("#noteType", {
     ancestorNoteId: cfg.knowledge.root,
     fastSearch: true,
     limit: 200,
   }).catch(() => ({ results: [] as Note[] }));
+  const relationTargets = new Set<string>();
+  for (const n of knowledgeNotes.results) {
+    for (const a of n.attributes) {
+      if (a.type === "relation" && a.name !== "template") relationTargets.add(a.value);
+    }
+  }
   let orphans = 0;
   for (const n of knowledgeNotes.results) {
     const kind = label(n, "noteType");
     if (kind === "domain") continue;
-    const hasRelation = n.attributes.some((a) => a.type === "relation" && a.name !== "template");
-    if (!hasRelation && orphans < 10) {
+    const hasOutgoing = n.attributes.some((a) => a.type === "relation" && a.name !== "template");
+    const hasIncoming = relationTargets.has(n.noteId);
+    if (!hasOutgoing && !hasIncoming && orphans < 10) {
       orphans++;
       report.flagged.push(`unconnected: "${n.title}" (${n.noteId}) — consider connect()`);
     }
