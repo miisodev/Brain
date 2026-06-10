@@ -44,9 +44,13 @@ const brainRef = { config: brain ?? EMPTY_BRAIN };
 const port      = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
 const authToken = process.env.MCP_AUTH_TOKEN;
 
+// BRAIN_MODE=core (default): the 12 intent-level tools.
+// BRAIN_MODE=full: additionally registers the low-level/advanced surface.
+const mode: "core" | "full" = process.env.BRAIN_MODE === "full" ? "full" : "core";
+
 function createServer(): McpServer {
-  const s = new McpServer({ name: "Brain", version: "3.5.0" });
-  registerTools(s, trilium, brainRef);
+  const s = new McpServer({ name: "Brain", version: "4.0.0" });
+  registerTools(s, trilium, brainRef, mode);
   return s;
 }
 
