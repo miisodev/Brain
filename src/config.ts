@@ -4,25 +4,47 @@
 // IDs are stored in brain.json next to the bundle (or at BRAIN_CONFIG_PATH).
 // On startup: load file → auto-discover from Trilium → fall back to empty.
 // bootstrap_brain writes this file; no manual editing required.
+//
+// v4: brain.json carries a `policy` block (lifecycle timings) and a `version`
+// marker. v3 files load unchanged — missing fields are defaulted in memory and
+// persisted the next time the config is saved.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import type { TriliumClient } from "./trilium.js";
+import { DEFAULT_POLICY, type LifecyclePolicy } from "./types.js";
 
 // ── Type ─────────────────────────────────────────────────────────────────────
 
+export interface TemplateIds {
+  root: string;
+  thread: string;
+  decision: string;
+  concept: string;
+  projectBrief: string;
+  person: string;
+  opinion: string;
+  domain: string;
+  question?: string;
+  reference?: string;
+  organization?: string;
+}
+
 export interface BrainConfig {
+  version?: number;
   root: string;
   identity: { root: string; profile: string; preferences: string; context: string };
   workingMemory: { root: string; inbox: string; threads: string; decisions: string; openQuestions: string };
   knowledge: { root: string; people: string; organizations: string; projects: string };
   opinions: string;
   log: { root: string; sessions: string; decisionsMade: string };
-  templates: { root: string; thread: string; decision: string; concept: string; projectBrief: string; person: string; opinion: string; domain: string };
+  templates: TemplateIds;
+  policy: LifecyclePolicy;
 }
 
 export const EMPTY_BRAIN: BrainConfig = {
+  version: 4,
   root: "",
   identity:      { root: "", profile: "", preferences: "", context: "" },
   workingMemory: { root: "", inbox: "", threads: "", decisions: "", openQuestions: "" },
@@ -30,6 +52,7 @@ export const EMPTY_BRAIN: BrainConfig = {
   opinions:      "",
   log:           { root: "", sessions: "", decisionsMade: "" },
   templates:     { root: "", thread: "", decision: "", concept: "", projectBrief: "", person: "", opinion: "", domain: "" },
+  policy:        { ...DEFAULT_POLICY },
 };
 
 // ── File path ─────────────────────────────────────────────────────────────────
@@ -46,7 +69,14 @@ export function loadConfig(): BrainConfig | null {
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf-8"));
-    if (typeof parsed?.root === "string") return parsed as BrainConfig;
+    if (typeof parsed?.root === "string") {
+      // Merge v3 files forward: default any missing v4 fields.
+      return {
+        ...parsed,
+        version: 4,
+        policy: { ...DEFAULT_POLICY, ...(parsed.policy ?? {}) },
+      } as BrainConfig;
+    }
   } catch {
     // Corrupted file — return null so discovery runs
   }
@@ -57,7 +87,7 @@ export function loadConfig(): BrainConfig | null {
 
 export function saveConfig(config: BrainConfig): string {
   const path = configFilePath();
-  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  writeFileSync(path, JSON.stringify({ ...config, version: 4 }, null, 2) + "\n", "utf-8");
   return path;
 }
 
@@ -77,7 +107,7 @@ export async function discoverBrain(trilium: TriliumClient): Promise<BrainConfig
   }
   if (!rootId) return null;
 
-  const config: BrainConfig = { ...EMPTY_BRAIN, root: rootId };
+  const config: BrainConfig = { ...EMPTY_BRAIN, policy: { ...DEFAULT_POLICY }, root: rootId };
 
   try {
     const root = await trilium.getNote(rootId);
@@ -113,7 +143,19 @@ export async function discoverBrain(trilium: TriliumClient): Promise<BrainConfig
           config.log = { root: id, sessions: g("Sessions"), decisionsMade: g("Decisions Made") };
           break;
         case "Templates":
-          config.templates = { root: id, thread: g("Thread"), decision: g("Decision"), concept: g("Concept"), projectBrief: g("Project Brief"), person: g("Person"), opinion: g("Opinion"), domain: g("Domain") };
+          config.templates = {
+            root: id,
+            thread: g("Thread"),
+            decision: g("Decision"),
+            concept: g("Concept"),
+            projectBrief: g("Project Brief"),
+            person: g("Person"),
+            opinion: g("Opinion"),
+            domain: g("Domain"),
+            question: g("Question") || undefined,
+            reference: g("Reference") || undefined,
+            organization: g("Organization") || undefined,
+          };
           break;
       }
     }

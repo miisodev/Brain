@@ -2,7 +2,7 @@
 
 An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://github.com/TriliumNext/Notes) into a persistent, graph-structured second brain for Claude and other LLM clients.
 
-**60 tools** across 13 categories — Trilium-convention naming, token-efficient stubs-first retrieval, a full knowledge graph with typed synapses and Hebbian weights, and zero manual ID management.
+**v4: the model supplies content; the server owns form.** Twelve intent-level tools with upsert semantics, server-side placement/naming/labeling, a uniform lifecycle with graceful degradation, and a self-healing maintenance sweep — designed so the model needs zero oversight during memory operations. The full low-level surface remains available behind `BRAIN_MODE=full`.
 
 <div align="center">
 
@@ -16,14 +16,16 @@ An MCP (Model Context Protocol) server that turns [TriliumNext Notes](https://gi
 
 ## Features
 
-- **Neural architecture** — engrams (notes), synapses (typed relations), synaptic weights (Hebbian reinforcement), connectome traversal
-- **60 tools** covering the full Trilium ETAPI surface plus high-level memory operations
-- **Zero ID pasting** — `bootstrap_brain` creates the full tree and writes `brain.json` automatically; auto-discovery rebuilds config if the file is missing
-- **Structured creation** — `create_*` tools produce properly formatted, labelled notes with `~template` relations wired automatically
-- **Knowledge graph** — BFS path-finding, neighbourhood expansion, full graph traversal with direction and depth controls
-- **Token economy** — list/search returns id+title stubs only; content fetched on demand
-- **Revision safety** — `create_note_revision` before edits; `update_memory` always pre-snapshots
-- **Calendar journal** — day/week/month/year notes for temporal context
+- **Zero-oversight by construction** — placement, naming, labels, templates, dedup, and archival are deterministic server policy, not instructions the model must remember
+- **One write path** — `remember(kind, title, body)` routes everything; **upsert semantics** make duplicates impossible (same kind + same normalized title → dated addendum, not a copy)
+- **Uniform lifecycle** — every ephemeral note follows `active → resolved | superseded`, with graceful degradation (`active → dormant → archived in place`) on configurable timings; degradation demotes, never deletes
+- **One completion path** — `resolve(noteId, outcome)` answers questions, decides decisions, closes threads; decisions auto-clone into the Log, outcomes can auto-promote into Knowledge
+- **Self-healing** — `maintain()` canonicalizes titles/labels/vocabulary, ages working memory, merges duplicate session logs, cleans legacy structure; the lite sweep runs automatically inside `start_session` / `end_session`
+- **Sessions built in** — `start_session` returns an orientation digest (identity, working set, review queue, last session, hygiene report); `end_session` is idempotent per date and triggers a DB backup
+- **Normalization layer** — HTML-entity decoding, status-suffix stripping, topic slugging, markdown→HTML conversion: the model's output is cleaned before it is stored
+- **Knowledge graph** — closed relation vocabulary enforced at the schema level, symmetric relations auto-wired both ways, BFS path-finding and neighbourhood traversal via `explore`
+- **Zero ID pasting** — `bootstrap_brain` creates the tree and writes `brain.json` automatically; auto-discovery rebuilds config if the file is missing
+- **Power mode** — `BRAIN_MODE=full` adds the raw surface: CRUD, attributes, attachments, revisions, calendar notes, Hebbian weights
 
 ---
 
@@ -234,11 +236,10 @@ Upload `SKILL.md` as a project knowledge file. Every conversation in that projec
 ### Option C — Store in Trilium (self-loading)
 
 ```
-store_memory(section="knowledge", title="Trilium Brain Skill", content=<SKILL.md contents>)
-add_label(noteId=..., name="skill", value="trilium-brain")
+remember(kind="reference", title="Brain Skill", body=<SKILL.md contents>, domain="Meta")
 ```
 
-At the start of any session: *"Load my Trilium Brain skill note and follow its session protocol."*
+At the start of any session: *"Load my Brain skill note and follow its session protocol."*
 
 ---
 
@@ -258,193 +259,123 @@ bun run init   # CLI bootstrap (alternative to bootstrap_brain tool)
 ```
 root
 └── 🧠 Trilium Brain
-    ├── 👤 Identity/
-    │   ├── Profile
-    │   ├── Preferences
-    │   └── Context
-    ├── 🔄 Working Memory/
-    │   ├── Inbox
-    │   ├── Threads
-    │   ├── Decisions
-    │   └── Open Questions
-    ├── 📚 Knowledge/
-    │   ├── People
-    │   ├── Organizations
-    │   ├── Projects
-    │   └── [domain]/
-    │       ├── Concepts/
-    │       ├── References/
-    │       └── Notes/
-    ├── 💭 Opinions
-    ├── 📅 Log/
-    │   ├── Sessions
-    │   └── Decisions Made
-    └── 🗂️ Templates/
-        ├── Thread
-        ├── Decision
-        ├── Concept
-        ├── Project Brief
-        ├── Person
-        ├── Opinion
-        └── Domain
+    ├── 👤 Identity/            Profile · Preferences · Context      (facet-routed identity facts)
+    ├── 🔄 Working Memory/      Inbox · Threads · Decisions · Open Questions   (ephemeral; ages)
+    ├── 📚 Knowledge/           People · Organizations · Projects · [Domain folders, auto-created flat]
+    ├── 💭 Opinions             dated stances — flat, never nested
+    ├── 📅 Log/                 Sessions · Decisions Made            (temporal record)
+    └── 🗂️ Templates/           server-managed
+```
+
+The model never chooses where a note goes — `remember(kind=...)` routes it. Domain folders are created on first use (flat — leaf notes carry their kind in `#noteType`; no `Concepts/References/Notes` subtrees). Projects are single brief notes; related content tags `project=<name>` instead of nesting.
+
+---
+
+## Lifecycle
+
+```
+                 resolve()                    [terminal — archived in place]
+   active ───────────────────────▶ resolved | superseded
+     │                                   ▲
+     │ untouched dormantAfterDays        │
+     ▼                                   │
+   dormant ──────────────────────────────┘
+     │ untouched archiveDormantAfterDays more
+     ▼
+   archived in place (#archived flag; excluded from default recall; never deleted)
+```
+
+Ephemeral kinds (`question`, `decision`, `thread`, `capture`) age on this timeline; durable kinds live until superseded or explicitly resolved. Timings are configurable in `brain.json`:
+
+```json
+"policy": {
+  "dormantAfterDays": 21,
+  "archiveDormantAfterDays": 45,
+  "inboxGraceDays": 7
+}
 ```
 
 ---
 
-## Tool Reference
+## Tool Reference — core surface (default)
 
-### Session / Orientation
 | Tool | Description |
 |------|-------------|
-| `start_session` | Boot session — returns three-level brain tree with all structural IDs. Call once per session, never again mid-session. |
-| `log_session` | Persist structured session summary into Log → Sessions. Call at end of every session. |
-| `get_brain_config` | Return the live brain.json config (all structural note IDs). |
+| `start_session` | Orientation digest: identity, working set with idle ages, review queue, last session, hygiene report. Runs the lite maintenance sweep. Once per session, first. |
+| `end_session` | Idempotent per-date session log (same-day calls append an addendum) + lite sweep + automatic DB backup. Once per session, last. |
+| `remember` | Store anything: `kind` ∈ identity / person / organization / project / concept / reference / opinion / question / decision / thread / capture. Routed, labeled, templated, deduped server-side. Body accepts text, markdown, or HTML. |
+| `recall` | Multi-strategy search (label → title → full-text), merged and ranked, with kind/status on every result and snippets for the top 3. Filters: `kinds`, `project`, `domain`, `includeArchived`. |
+| `read_note` | Full note: metadata + labels + relations + content in one call. |
+| `revise` | Append a dated addendum (default) or replace the body; auto-snapshots first; reactivates dormant notes. |
+| `resolve` | The one completion path: writes the outcome, sets status, archives in place; decisions auto-clone to Log → Decisions Made; `promote=true` distills into Knowledge wired `derivedFrom`. |
+| `connect` | Typed relation from the closed vocabulary; symmetric types wired both ways; idempotent; `remove=true` deletes. |
+| `explore` | Graph traversal: `links` / `backlinks` / `neighborhood` / `path`. |
+| `maintain` | Maintenance sweep: canonicalization, lifecycle aging, legacy migration, structure repair (deep), dry-run preview. |
+| `forget` | Archive in place (default) or hard-delete (`hard=true`; blocked while backlinks exist). |
+| `bootstrap_brain` | Create or repair the brain structure; writes `brain.json`; idempotent. |
 
-### Search
-| Tool | Description |
-|------|-------------|
-| `search_notes` | Full Trilium search — text, `#label=value`, date operators, subtree scope. |
-| `search_notes_by_label` | Fast label search: `#name=value` shorthand. Best for structured retrieval. |
-| `get_recent_notes` | Up to 50 recently modified notes, newest first. |
+## Tool Reference — advanced surface (`BRAIN_MODE=full`)
 
-### Note CRUD
-| Tool | Description |
-|------|-------------|
-| `get_note` | Metadata only (attributes, parents, children). No content. |
-| `get_note_content` | Raw content only. |
-| `get_note_with_content` | Metadata + content in one call. |
-| `create_note` | Create a raw note at any location. |
-| `update_note_content` | Replace full content (no automatic pre-snapshot). |
-| `patch_note` | Mutate title, type, or MIME without touching content. |
-| `delete_note` | Delete a note permanently. Prefer `add_label(#archived)` instead. |
+Adds the low-level tools for power users and data surgery: `search_notes`, `get_recent_notes`, `create_note`, `update_note_content`, `patch_note`, `delete_note`, `clone_note`, `move_note`, `set_label`, `add_relation` (custom names), `delete_attribute`, `strengthen_relation` / `weaken_relation` (Hebbian weights), `get_relation_types`, `bulk_set_label`, `suggest_connections`, attachments (4), revisions (3), calendar notes (4), `get_brain_config`, `get_app_info`, `create_backup`.
 
-### Structure / Branching
-| Tool | Description |
-|------|-------------|
-| `clone_note` | Place a note in an additional parent (multi-parent, shared content). |
-| `move_note` | Move a note to a new parent. |
-
-### Attributes
-| Tool | Description |
-|------|-------------|
-| `add_label` | Add `#key=value` label to a note. |
-| `update_label` | Update an existing label value in-place (atomic PATCH). |
-| `add_relation` | Create a typed directional relation between two notes. |
-| `delete_relation` | Remove a named relation by source + type + target. |
-| `delete_attribute` | Delete any attribute by raw attributeId. |
-| `strengthen_relation` | Increment synaptic weight (+1). Call after traversing a path that proved useful. |
-| `weaken_relation` | Decrement synaptic weight (floors at 0, label removed). Call when a path was misleading or stale. |
-| `get_relation_types` | Discover all relation type names in use across the brain. |
-| `get_related_notes` | Find all notes connected via a specific relation type. |
-
-### Graph / Relations
-| Tool | Description |
-|------|-------------|
-| `get_outgoing_relations` | Outgoing relations from a note (includes synaptic weights). |
-| `get_incoming_relations` | Incoming relations into a note (backlinks). |
-| `find_relation_path` | Shortest BFS path connecting two notes. |
-| `get_note_neighborhood` | All notes within N hops (center node included at depth=0). |
-| `traverse_graph` | Full graph walk with direction, type filter, depth, and node cap. |
-
-### Structured Creation
-| Tool | Description |
-|------|-------------|
-| `create_thread` | Reasoning thread in Working Memory → Threads. |
-| `create_decision` | ADR-format decision record in Working Memory → Decisions. |
-| `create_concept` | Atomic concept under Knowledge → [domain] → Concepts. |
-| `create_domain` | New domain subtree with Concepts / References / Notes subfolders. |
-| `create_opinion` | Blog/diary-style opinion entry under Opinions (flat). |
-| `create_project` | Structured project brief under Knowledge → Projects. |
-
-### Memory / Recall
-| Tool | Description |
-|------|-------------|
-| `recall_memory` | Search memory sections with inline content snippets for top 3 matches. |
-| `store_memory` | Persist a new note into a memory section with auto-labels. |
-| `update_memory` | Update an existing memory note — pre-snapshots then overwrites. |
-| `manage_thread` | `append / close / list` thread lifecycle management. |
-| `triage_inbox` | `list / promote / discard` inbox items. |
-| `promote_to_knowledge` | Promote a Working Memory note to durable Knowledge (`~derivedFrom` wired). |
-
-### Maintenance
-| Tool | Description |
-|------|-------------|
-| `find_orphan_notes` | Find structured notes with no relations and no meaningful labels. |
-| `suggest_connections` | Candidate connections based on shared labels (ranked by overlap). |
-| `bulk_add_label` | Apply a label to multiple notes in one call. |
-
-### Attachments
-| Tool | Description |
-|------|-------------|
-| `get_note_attachments` | List attachments on a note (id+title+mime+size). |
-| `get_attachment_content` | Read attachment content. |
-| `create_attachment` | Attach a file or text blob to a note. |
-| `delete_attachment` | Delete an attachment permanently. |
-| `update_attachment` | Update attachment metadata (title, mime). |
-
-### Revisions
-| Tool | Description |
-|------|-------------|
-| `get_note_revisions` | All saved revisions, newest first. |
-| `get_revision_content` | Content of a historical revision. |
-| `create_note_revision` | Manually save a revision before significant edits. |
-
-### Calendar
-| Tool | Description |
-|------|-------------|
-| `get_day_note` | Get/create today's journal day note. |
-| `get_week_note` | Get/create week note (YYYY-Www). |
-| `get_month_note` | Get/create month note (YYYY-MM). |
-| `get_year_note` | Get/create year note (YYYY). |
-| `get_inbox_note` | Get the Trilium calendar inbox note for a date. |
-
-### System
-| Tool | Description |
-|------|-------------|
-| `get_app_info` | Trilium server version, DB version, runtime metadata. |
-| `create_backup` | Trigger a named DB backup (`brain-{date}.db`). |
-| `bootstrap_brain` | Initialize or inspect the full brain hierarchy. Writes `brain.json` and activates config live. |
+```json
+"env": {
+  "TRILIUM_BASE_URL": "http://localhost:8080",
+  "TRILIUM_ETAPI_TOKEN": "...",
+  "BRAIN_MODE": "full"
+}
+```
 
 ---
 
-## Label Conventions
+## Label Conventions (written by the server — not the model)
 
 | Label | Values | Purpose |
 |-------|--------|---------|
-| `#noteType` | `thread` / `decision` / `concept` / `domain` / `project` / `person` / `opinion` / `session` / `knowledge` | Primary type classifier |
-| `#status` | `active` / `pending` / `resolved` / `consolidated` / `triaged` / `superseded` | Lifecycle state |
-| `#topic` | free text | Subject tag for search/filtering |
-| `#domain` | free text (e.g. `Technology`, `Philosophy`) | Knowledge domain |
-| `#dateOpened` / `#dateWritten` / `#dateStarted` / `#dateStored` | ISO date | Creation timestamps |
-| `#dateUpdated` / `#dateConsolidated` | ISO date | Mutation timestamps |
-| `#mood` | `contemplative` / `passionate` / `uncertain` / `analytical` | Opinion tone |
-| `#archived` | (flag) | Soft-delete — prefer over hard deletion |
-| `#confidence` | `high` / `medium` / `low` | Epistemic confidence |
-| `#sw_{type}_{targetId}` | integer | Synaptic weight — managed by `strengthen_relation` / `weaken_relation` |
+| `#noteType` | `identity` / `person` / `organization` / `project` / `concept` / `reference` / `opinion` / `question` / `decision` / `thread` / `capture` / `session` / `domain` | Kind — exactly one per note |
+| `#status` | `active` / `dormant` / `resolved` / `superseded` | Lifecycle state |
+| `#created` / `#updated` / `#closed` | ISO date | The complete date vocabulary |
+| `#topic` | slugged, repeatable | Subject tags (`ai-tooling`) |
+| `#domain` / `#project` | slugged | Knowledge domain / project membership |
+| `#facet` | `profile` / `preference` / `context` | Identity routing |
+| `#mood` | slugged | Opinion tone |
+| `#archived` | (flag) | Excluded from default recall; content preserved in place |
+| `#sw_{type}_{targetId}` | integer | Synaptic weight (advanced mode) |
+
+Legacy v3 labels (`dateOpened`, `dateStored`, `sessionDate`, `noteType=knowledge`, `status=pending`, …) are migrated automatically by `maintain`.
 
 ---
 
-## Relation (Synapse) Vocabulary
+## Relation Vocabulary (closed — enforced by `connect`)
 
-| Synapse | Direction | Use when |
-|---------|-----------|----------|
+| Relation | Direction | Use when |
+|----------|-----------|----------|
 | `relatesTo` | A → B | Generic connection (last resort) |
 | `extends` | A → B | A builds on or elaborates B |
 | `contradicts` | A → B | A conflicts with B |
 | `supports` | A → B | A provides evidence for B |
 | `causes` | A → B | A produces or leads to B |
 | `references` | A → B | A cites B as a source |
-| `partOf` | A → B | A structurally belongs inside B |
-| `worksWith` | A ↔ B | A and B cooperate or are used together |
+| `partOf` | A → B | A semantically belongs to B (auto-wired for `project=`) |
+| `worksWith` | A ↔ B | Collaboration — symmetric, auto-bidirectional |
 | `mentors` | A → B | A teaches or guides B |
 | `instanceOf` | A → B | A is a concrete example of B |
-| `supersedes` | A → B | A replaces B (archive B with `#status=superseded`) |
+| `supersedes` | A → B | A replaces B (auto-wired via `supersedes=`; B archived) |
 | `implements` | A → B | A is the realisation of concept B |
 | `inspiredBy` | A → B | A was conceptually influenced by B |
 | `sourceOf` | A → B | A is the origin or provenance of B |
-| `derivedFrom` | A → B | A was synthesised from B |
+| `derivedFrom` | A → B | A was synthesised from B (auto-wired by `resolve(promote=true)`) |
 
-> `~template` is a Trilium-internal relation wired automatically by `create_*` tools. Do not wire it manually.
+> `~template` is Trilium-internal and wired automatically. Never wire it manually.
+
+---
+
+## Migrating from v3
+
+1. Pull v4, `bun install && bun run build`, restart your MCP client. Your `brain.json` loads unchanged (the lifecycle `policy` block is added with defaults).
+2. Ask Claude to run `maintain(deep=true)` once. The sweep migrates everything in place: legacy label vocabularies, the v3 date-label zoo, title status-suffixes, naked question notes, empty per-project/per-domain container folders, duplicate session logs.
+3. If you relied on the removed high-level v3 tools (`store_memory`, `create_thread`, `log_session`, …), their behavior now lives in `remember` / `resolve` / `end_session`. Set `BRAIN_MODE=full` if you also want the raw low-level surface.
+4. Replace your installed skill with the new `SKILL.md`.
 
 ---
 

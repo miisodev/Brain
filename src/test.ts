@@ -5,7 +5,7 @@
  */
 
 import { TriliumClient } from "./trilium.js";
-import { Brain as Trilium } from "./constants.js";
+import { loadConfig, discoverBrain } from "./config.js";
 
 const baseUrl = process.env.TRILIUM_BASE_URL;
 const token = process.env.TRILIUM_ETAPI_TOKEN;
@@ -16,6 +16,13 @@ if (!baseUrl || !token) {
 }
 
 const trilium = new TriliumClient(baseUrl, token);
+
+// Resolve real structural IDs — brain.json if co-located, else live discovery.
+const Trilium = loadConfig() ?? (await discoverBrain(trilium));
+if (!Trilium) {
+  console.error("No brain found in Trilium — run `bun run init` or the bootstrap_brain tool first.");
+  process.exit(1);
+}
 let passed = 0;
 let failed = 0;
 const cleanup: string[] = []; // noteIds to delete at the end
