@@ -223,19 +223,22 @@ This writes `brain.json` next to `dist/index.js` and prints all created note IDs
 
 ## Skill installation
 
-`skills/brain/SKILL.md` teaches Claude how to use Trilium Brain effectively — session protocol, tool selection, label/relation conventions, note formats, and hygiene rules. It references additional detail files in `skills/brain/references/` (full-mode tools, troubleshooting, taxonomy) that are loaded on demand.
+`skills/brain/SKILL.md` teaches Claude how to use Trilium Brain effectively — session protocol, tool selection, label/relation conventions, note formats, and hygiene rules. Supplementary detail files in `skills/brain/references/` (full-mode tools, troubleshooting, taxonomy) are loaded on demand.
 
-### Option A — Plugin install (recommended)
+### Option A — .skill file (recommended)
 
-The repo ships as a proper Cowork/Claude Code plugin (`.claude-plugin/plugin.json` + `skills/brain/`). Install it directly from the repo:
+`skills/brain.skill` is a prebuilt installable package. In Claude Desktop, open **Skills → Install from file** and select it. The skill and all its reference files install in one step.
 
-```
-/plugin install path/to/Brain
+To rebuild it after editing:
+
+```bash
+cd /path/to/skill-creator
+PYTHONUTF8=1 python -m scripts.package_skill /path/to/Brain/skills/brain /path/to/Brain/skills
 ```
 
 ### Option B — System prompt
 
-Paste the contents of `skills/brain/SKILL.md` into **Settings → Custom Instructions** in Claude Desktop. Copy the `skills/brain/references/` files somewhere accessible and update the `references/` paths in the skill accordingly.
+Paste the contents of `skills/brain/SKILL.md` into **Settings → Custom Instructions** in Claude Desktop. The `references/` files are loaded by path at runtime — they need to remain at their current location relative to the skill.
 
 ### Option C — Project knowledge (Claude Projects)
 
