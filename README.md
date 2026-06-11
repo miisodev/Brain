@@ -223,20 +223,28 @@ This writes `brain.json` next to `dist/index.js` and prints all created note IDs
 
 ## Skill installation
 
-`SKILL.md` teaches Claude how to use Trilium Brain effectively — session protocol, tool selection, label/relation conventions, note formats, and hygiene rules.
+`skills/brain/SKILL.md` teaches Claude how to use Trilium Brain effectively — session protocol, tool selection, label/relation conventions, note formats, and hygiene rules. It references additional detail files in `skills/brain/references/` (full-mode tools, troubleshooting, taxonomy) that are loaded on demand.
 
-### Option A — System prompt (recommended)
+### Option A — Plugin install (recommended)
 
-Paste `SKILL.md` into **Settings → Custom Instructions** in Claude Desktop. The model follows the skill protocol automatically in every session where Trilium Brain is connected.
-
-### Option B — Project knowledge (Claude Projects)
-
-Upload `SKILL.md` as a project knowledge file. Every conversation in that project has the skill in context automatically.
-
-### Option C — Store in Trilium (self-loading)
+The repo ships as a proper Cowork/Claude Code plugin (`.claude-plugin/plugin.json` + `skills/brain/`). Install it directly from the repo:
 
 ```
-remember(kind="reference", title="Brain Skill", body=<SKILL.md contents>, domain="Meta")
+/plugin install path/to/Brain
+```
+
+### Option B — System prompt
+
+Paste the contents of `skills/brain/SKILL.md` into **Settings → Custom Instructions** in Claude Desktop. Copy the `skills/brain/references/` files somewhere accessible and update the `references/` paths in the skill accordingly.
+
+### Option C — Project knowledge (Claude Projects)
+
+Upload `skills/brain/SKILL.md` as a project knowledge file. Every conversation in that project has the skill in context automatically.
+
+### Option D — Store in Trilium (self-loading)
+
+```
+remember(kind="reference", title="Brain Skill", body=<skills/brain/SKILL.md contents>, domain="Meta")
 ```
 
 At the start of any session: *"Load my Brain skill note and follow its session protocol."*

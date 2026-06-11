@@ -178,14 +178,14 @@ Trilium Brain
 5. Wiring only **real** relations — a connection you can name gets wired; a vibe does not.
 6. Surfacing review-queue items to the user when relevant.
 
-**Anti-patterns — never:**
-- Status words in titles ("— RESOLVED", "(done)") — stripped anyway, but don't fight the system
-- Re-implementing dedup, placement, or archival with advanced tools
-- `capture` for content that obviously has a kind
-- Closing anything with a one-word outcome
-- A thread for a single-session task (that's the session log's job)
-- Editing anything under Templates/, or retitling structural folders
-- Storing secrets — API keys, passwords, tokens. Trilium is not a vault; refuse politely and explain
+**Things that look helpful but cause problems:**
+- Status words in titles ("— RESOLVED", "(done)") — they get stripped server-side anyway, and they pollute the dedup key, so future notes on the same subject won't match
+- Re-implementing dedup or placement with advanced tools — the server's guarantees only hold when you use the high-level path; bypassing them creates orphans and duplicates
+- `capture` for content that obviously fits a kind — captures age out quickly; a miscategorized `reference` is findable forever, an over-used `capture` is not
+- One-word outcomes in `resolve()` — the outcome is the only thing future sessions read; "done" tells them nothing
+- A thread for a single-session task — threads accumulate and clog the review queue; use the session log for within-session work
+- Editing under Templates/, or retitling structural folders — the server uses these by ID and name; manual edits break routing silently
+- Storing secrets (API keys, passwords, tokens) — Trilium's DB is a local file and its backup goes to disk; it is not a vault
 
 ---
 
@@ -212,30 +212,21 @@ Wire with `connect(fromId, relation, toId)` the moment you *notice* a real conne
 - `connect` is idempotent (existing edges detected); `remove=true` deletes an edge.
 - **Wired automatically — don't duplicate:** person↔org (`worksWith` via `org=`), note→project (`partOf` via `project=`), new→old (`supersedes` via `supersedes=`), promoted→source (`derivedFrom` via `resolve(promote=true)`), templates.
 
+For the full relation table with "use when" descriptions, and all label conventions (`#noteType`, `#status`, `#topic`, etc.) with filtering guidance, read `references/taxonomy.md`.
+
 ---
 
-## Edge Cases & Failure Modes
+## Quick-Fix Reference
 
-| Situation | What happens / what to do |
+Three situations that need immediate action — everything else is in `references/troubleshooting.md`.
+
+| Situation | Fix |
 |---|---|
-| Brain not initialized | `start_session` returns `status: "uninitialized"` → run `bootstrap_brain` (idempotent, safe anytime) |
-| Second `end_session` same day | Appends an addendum to today's session note — by design, not an error |
-| `remember()` says `action: "updated"` unexpectedly | A same-kind note with that title existed; content was appended there. If it was genuinely a different subject, `remember()` again with a distinguishing title |
-| User contradicts a stored identity fact | `recall` it, then `revise(noteId, mode="replace")` with the corrected fact — identity facts are current-state, not history |
-| A stored fact was wrong from the start | `revise(mode="replace")` — a revision snapshot is taken automatically, nothing is lost |
-| User asks you to forget something | `forget(noteId, reason)` archives it. If they want it *gone* (privacy), `forget(noteId, hard=true)` |
-| `forget(hard=true)` returns `blocked` | Other notes still link there. Remove the listed backlinks (`connect(..., remove=true)`) or archive instead |
-| Person changes organizations | `connect(person, worksWith, oldOrg, remove=true)`, then `connect` the new org; record the change in the person's body via `revise()` |
-| Project completes or is abandoned | `resolve(projectId, outcome)` — works on durable kinds too; archives the brief in place |
-| A dormant item becomes relevant again | Any `revise()` touch reactivates it to `active` automatically |
-| Two notes turn out to be the same subject | `revise()` the better one with the other's content (append), then `forget(worseId, reason="merged into <id>")` |
-| `resolve()` on a legacy/freeform note with no Resolution section | Works — the section is appended |
-| Structural note passed to revise/resolve/forget | Refused server-side with an error — pick the right noteId |
-| Long conversation, no natural end | Call `end_session` when the work *topic* wraps, even if chat continues; a later wrap-up appends |
-| User edited notes directly in Trilium | Fine — that's a feature. Run `maintain(deep=true)` next session to re-canonicalize |
-| Sweep flags a stray you can't classify | Tell the user what it is and where; flags are conversation starters, not auto-fixes |
-| Trilium unreachable / tool errors | Tell the user plainly; don't retry in a loop. Nothing is lost by waiting for the next session |
-| A task seems to need a missing tool | The low-level surface exists behind `BRAIN_MODE=full` (raw CRUD, attachments, revisions, calendar, Hebbian weights). Suggest enabling it; don't simulate it with workarounds |
+| Brain tools time out / connection errors | Run `C:\Users\miiso\Projects\OSS\Brain\scripts\start-trilium.ps1` (PowerShell tool) — starts Trilium on port 37840, no-ops if already up. Wait ~3 s then retry. |
+| `start_session` → `uninitialized` | Run `bootstrap_brain` (idempotent, safe anytime) |
+| `remember()` says `action: "updated"` unexpectedly | A same-kind note with that title already existed; your body was appended there. Use a distinguishing title if it's genuinely a different subject. |
+
+For all other edge cases and symptoms, read `references/troubleshooting.md`.
 
 ---
 
@@ -258,13 +249,11 @@ Wire with `connect(fromId, relation, toId)` the moment you *notice* a real conne
 
 ---
 
-## Troubleshooting
+## Full Mode (BRAIN_MODE=full)
 
-| Symptom | Fix |
-|---|---|
-| `start_session` → `uninitialized` | `bootstrap_brain` |
-| Hygiene report mentions legacy fixes every session | Run `maintain(deep=true)` once to converge the whole tree |
-| `recall` returns odd results | It already filters untyped notes; if it persists, `maintain(deep=true)` then retry |
-| Items going dormant too fast / too slow | User edits `policy` in `brain.json` (`dormantAfterDays` / `archiveDormantAfterDays` / `inboxGraceDays`) |
-| Need raw Trilium access (attachments, calendar, custom queries) | Set `BRAIN_MODE=full` in the MCP server env and restart the connection |
+`BRAIN_MODE=full` is active, giving you 27 additional low-level tools across: raw note CRUD, structure (clone/move), attributes, Hebbian weights, bulk ops, attachments, revisions, calendar/journal, and system utilities.
+
+Use the core surface above for all routine memory. Reach for full-mode when the high-level path genuinely cannot do the job — these tools bypass normalization, lifecycle, and dedup, so correctness is on you.
+
+Read `references/full-mode.md` for the complete tool signatures and when-to-use guidance.
 | Config IDs stale after restructuring in Trilium | `bootstrap_brain` re-discovers and rewrites `brain.json` |
